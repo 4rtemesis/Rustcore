@@ -1,4 +1,6 @@
-## Interface: 11508
+## Interface: 11508, 20505
+## Interface-Vanilla: 11508
+## Interface-TBC: 20505
 ## Title: Rustcore
 ## Notes: Disabled repair and deletes items on death.
 ## Author: Rustcore

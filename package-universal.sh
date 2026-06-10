@@ -3,18 +3,14 @@
 set -euo pipefail
 
 addon_name="Rustcore"
-version="${1:-$(date +%Y%m%d-%H%M%S)}"
-dist_dir="dist"
-stage_dir="${dist_dir}/${addon_name}"
-zip_path="${dist_dir}/${addon_name}-${version}.zip"
+release_dir="dist/release-ready/universal"
+stage_dir="${release_dir}/${addon_name}"
+zip_path="${release_dir}/${addon_name}.zip"
 
-mkdir -p "${dist_dir}"
 rm -rf "${stage_dir}"
 mkdir -p "${stage_dir}"
 
 files=(
-  "Rustcore.toc"
-  "Rustcore.lua"
   "RustcoreBroadcast.lua"
   "RustcoreTheme.lua"
   "RustcoreStats.lua"
@@ -22,6 +18,8 @@ files=(
   "RustcoreUI.lua"
   "RCicon.png"
 )
+
+cp "RustcoreEra/Rustcore.lua" "${stage_dir}/Rustcore.lua"
 
 for file in "${files[@]}"; do
   if [[ ! -s "${file}" ]]; then
@@ -35,12 +33,14 @@ cp -r "UI" "${stage_dir}/"
 cp -r "Font" "${stage_dir}/"
 cp -r "Audio" "${stage_dir}/"
 
+cp "RustcoreUniversal.toc" "${stage_dir}/Rustcore.toc"
+
 rm -f "${zip_path}"
 
 if command -v zip >/dev/null 2>&1; then
   (
-    cd "${dist_dir}"
-    zip -r "$(basename "${zip_path}")" "${addon_name}"
+    cd "${release_dir}"
+    zip -qr "$(basename "${zip_path}")" "${addon_name}"
   )
 elif command -v python3 >/dev/null 2>&1; then
   python3 -c '
@@ -67,4 +67,4 @@ else
   exit 1
 fi
 
-echo "Created ${zip_path}"
+echo "Created ${stage_dir} and ${zip_path}"

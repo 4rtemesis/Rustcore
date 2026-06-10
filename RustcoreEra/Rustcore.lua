@@ -29,6 +29,7 @@ local defaults = {
     guildDeathMessage = true, -- send a guild chat message after the death animation
     showDeathPopup  = true,  -- show popup notification for other players' deaths
     showDeathWarning= true, -- show center-screen warning for other players' deaths
+    showStatsWindow = false, -- show the always-on-screen item loss stats window
 }
 
 -- Gear slots tracked (shirt=4, tabard=19 excluded)
@@ -47,6 +48,9 @@ local minimapButton
 local UpdateMinimapButtonPosition
 local ApplyRepairBlock
 local ClearPendingDeletionData
+local activeSelfFoundSource
+local selfFoundBagSnapshot
+local selfFoundMoneySnapshot
 local minimapShapes = {
     ["ROUND"] = {true, true, true, true},
     ["SQUARE"] = {false, false, false, false},
@@ -104,16 +108,151 @@ function Rustcore.GetAssetPath(filename)
     return "Interface\\AddOns\\" .. folder .. "\\" .. filename
 end
 
+local function EnsureSelfFoundProfile()
+    RustcoreDB.selfFoundCharacters = RustcoreDB.selfFoundCharacters or {}
+    local key = Rustcore.GetCharacterKey and Rustcore.GetCharacterKey() or UnitName("player") or "player"
+    RustcoreDB.selfFoundCharacters[key] = RustcoreDB.selfFoundCharacters[key] or {}
+    local profile = RustcoreDB.selfFoundCharacters[key]
+    if profile.startedAtLevelOne == nil then profile.startedAtLevelOne = false end
+    if profile.hasEnabledSelfFound == nil then profile.hasEnabledSelfFound = profile.startedAtLevelOne or false end
+    if profile.externalItemReceived == nil then profile.externalItemReceived = false end
+    return profile
+end
+
+local function MarkSelfFoundEnabled()
+    if not Rustcore.GetSetting("selfFound") then return end
+    local profile = EnsureSelfFoundProfile()
+    profile.hasEnabledSelfFound = true
+    if (UnitLevel("player") or 0) <= 1 then
+        profile.startedAtLevelOne = true
+    end
+end
+
+function Rustcore.GetSelfFoundIconState()
+    local profile = EnsureSelfFoundProfile()
+    if not profile.hasEnabledSelfFound or profile.externalItemReceived then
+        return nil
+    end
+    if Rustcore.GetSetting("selfFound") then
+        return "verified"
+    end
+    return "warning"
+end
+
+local function RefreshSelfFoundStatsIcon()
+    if RustcoreStats and RustcoreStats.RefreshSelfFoundIcon then
+        RustcoreStats.RefreshSelfFoundIcon()
+    end
+end
+
+local function GetBagItemLinkAndCount(bag, slot)
+    if C_Container and C_Container.GetContainerItemInfo then
+        local info = C_Container.GetContainerItemInfo(bag, slot)
+        if info then
+            return info.hyperlink, info.stackCount or 1
+        end
+    elseif GetContainerItemInfo then
+        local _, count, _, _, _, _, link = GetContainerItemInfo(bag, slot)
+        return link, count or 1
+    end
+end
+
+local function GetItemCountKey(link)
+    if not link then return nil end
+    return link:match("item:(%d+)") or link
+end
+
+local function CaptureBagSnapshot()
+    local snapshot = {}
+    local maxBag = NUM_BAG_SLOTS or 4
+    for bag = 0, maxBag do
+        local slots = 0
+        if C_Container and C_Container.GetContainerNumSlots then
+            slots = C_Container.GetContainerNumSlots(bag) or 0
+        elseif GetContainerNumSlots then
+            slots = GetContainerNumSlots(bag) or 0
+        end
+        for slot = 1, slots do
+            local link, count = GetBagItemLinkAndCount(bag, slot)
+            local key = GetItemCountKey(link)
+            if key then
+                snapshot[key] = (snapshot[key] or 0) + (count or 1)
+            end
+        end
+    end
+    return snapshot
+end
+
+local function MarkExternalSelfFoundItem(source)
+    local profile = EnsureSelfFoundProfile()
+    if profile.externalItemReceived then return end
+    profile.externalItemReceived = true
+    profile.externalItemSource = source
+    profile.externalItemTime = time and time() or nil
+    print("|cffff4444Rustcore:|r Self Found verification lost after receiving something from " .. source .. ".")
+    RefreshSelfFoundStatsIcon()
+end
+
+local function CheckForExternalSelfFoundItems(source)
+    if not activeSelfFoundSource or activeSelfFoundSource ~= source or not selfFoundBagSnapshot then return end
+    if source ~= "mail" and source ~= "trade" then return end
+    local current = CaptureBagSnapshot()
+    for key, count in pairs(current) do
+        if count > (selfFoundBagSnapshot[key] or 0) then
+            MarkExternalSelfFoundItem(source)
+            break
+        end
+    end
+
+    if selfFoundMoneySnapshot and GetMoney and GetMoney() > selfFoundMoneySnapshot then
+        MarkExternalSelfFoundItem(source)
+    end
+end
+
+local function BeginSelfFoundSource(source)
+    if Rustcore.GetSetting("selfFound") then return end
+    activeSelfFoundSource = source
+    selfFoundBagSnapshot = CaptureBagSnapshot()
+    selfFoundMoneySnapshot = GetMoney and GetMoney() or nil
+    RefreshSelfFoundStatsIcon()
+end
+
+local function EndSelfFoundSource(source)
+    if activeSelfFoundSource ~= source then return end
+    C_Timer.After(0.5, function()
+        CheckForExternalSelfFoundItems(source)
+        if activeSelfFoundSource == source then
+            activeSelfFoundSource = nil
+            selfFoundBagSnapshot = nil
+            selfFoundMoneySnapshot = nil
+        end
+    end)
+end
+
 function Rustcore.SetSetting(key, value)
     if Rustcore.SettingsLocked() then
         print("|cffff4444Rustcore:|r Settings cannot be changed while in combat.")
         return false
     end
     RustcoreDB[key] = value
+    if key == "selfFound" then
+        if value then
+            MarkSelfFoundEnabled()
+        end
+        RefreshSelfFoundStatsIcon()
+    end
     if key == "showMinimapButton" then
         ApplyMinimapButtonVisibility()
     elseif key == "allowRepair" and ApplyRepairBlock then
         C_Timer.After(0, ApplyRepairBlock)
+        if RustcoreStats and RustcoreStats.RefreshLayout then
+            RustcoreStats.RefreshLayout()
+        end
+    elseif key == "showStatsWindow" and RustcoreStats then
+        RustcoreStats.ApplyVisibility()
+    elseif key == "difficulty" and RustcoreStats and RustcoreStats.RefreshStyle then
+        RustcoreStats.RefreshStyle()
+        RustcoreStats.RefreshLayout()
     end
     return true
 end
@@ -156,13 +295,14 @@ local function TakeSnapshot()
         if slotId ~= skipSlot then
             local link = GetInventoryItemLink("player", slotId)
             if link then
-                local name = GetItemInfo(link)
+                local name, _, _, ilvl = GetItemInfo(link)
                 local tex = GetInventoryItemTexture("player", slotId) or GetItemIcon(link)
                 combatSnapshot[#combatSnapshot + 1] = {
                     slot = slotId,
                     link = link,
                     name = name or ("Slot " .. slotId),
                     tex = tex,
+                    ilvl = ilvl or 0,
                 }
             end
         end
@@ -301,12 +441,12 @@ local function OnPlayerDead()
             RustcoreDB.pendingDeletionOwner = GetCurrentCharacterKey()
             for _, item in ipairs(markedItems) do
                 RustcoreDB.pendingDeletion[#RustcoreDB.pendingDeletion+1] = {
-                    slot = item.slot, link = item.link, name = item.name, tex = item.tex,
+                    slot = item.slot, link = item.link, name = item.name, tex = item.tex, ilvl = item.ilvl,
                 }
             end
             for _, item in ipairs(source) do
                 RustcoreDB.pendingDeletionSnapshot[#RustcoreDB.pendingDeletionSnapshot+1] = {
-                    slot = item.slot, link = item.link, name = item.name, tex = item.tex,
+                    slot = item.slot, link = item.link, name = item.name, tex = item.tex, ilvl = item.ilvl,
                 }
             end
             RustcoreDB.lastDeathSource = lastDeathSource
@@ -512,8 +652,12 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_UNGHOST")
 eventFrame:RegisterEvent("UI_SCALE_CHANGED")
 eventFrame:RegisterEvent("MAIL_SHOW")
+eventFrame:RegisterEvent("MAIL_CLOSED")
 eventFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
 eventFrame:RegisterEvent("TRADE_SHOW")
+eventFrame:RegisterEvent("TRADE_CLOSED")
+eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+eventFrame:RegisterEvent("PLAYER_MONEY")
 eventFrame:RegisterEvent("MERCHANT_SHOW")
 eventFrame:RegisterEvent("MERCHANT_CLOSED")
 
@@ -522,7 +666,12 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if (...) == ADDON_NAME then
             Rustcore.assetFolder = (...)
             InitSettings()
+            EnsureSelfFoundProfile()
+            MarkSelfFoundEnabled()
             RustcoreBroadcast.Init()
+            if RustcoreStats and RustcoreStats.Init then
+                RustcoreStats.Init()
+            end
             CreateMinimapButton()
             print("|cffff4444Rustcore|r loaded. |cffffd700/rustcore|r for options.")
 
@@ -589,7 +738,12 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if Rustcore.GetSetting("selfFound") then
             C_Timer.After(0, function() HideUIPanel(MailFrame) end)
             print("|cffff4444Rustcore:|r Mailbox blocked (Self-Found mode).")
+        else
+            BeginSelfFoundSource("mail")
         end
+
+    elseif event == "MAIL_CLOSED" then
+        EndSelfFoundSource("mail")
 
     elseif event == "AUCTION_HOUSE_SHOW" then
         if Rustcore.GetSetting("selfFound") then
@@ -601,6 +755,21 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if Rustcore.GetSetting("selfFound") then
             C_Timer.After(0, function() CloseTrade() end)
             print("|cffff4444Rustcore:|r Trading blocked (Self-Found mode).")
+        else
+            BeginSelfFoundSource("trade")
+        end
+
+    elseif event == "TRADE_CLOSED" then
+        EndSelfFoundSource("trade")
+
+    elseif event == "BAG_UPDATE_DELAYED" then
+        if activeSelfFoundSource then
+            CheckForExternalSelfFoundItems(activeSelfFoundSource)
+        end
+
+    elseif event == "PLAYER_MONEY" then
+        if activeSelfFoundSource then
+            CheckForExternalSelfFoundItems(activeSelfFoundSource)
         end
 
     elseif event == "MERCHANT_SHOW" then

@@ -2,12 +2,13 @@
 ## Title: Rustcore
 ## Notes: Disabled repair and deletes items on death.
 ## Author: Rustcore
-## Version: 1.11
+## Version: 1.2
 ## IconTexture: Interface\AddOns\Rustcore\RCicon.png
 ## SavedVariables: RustcoreDB
 
 Rustcore.lua
 RustcoreBroadcast.lua
 RustcoreTheme.lua
+RustcoreStats.lua
 RustcoreOptions.lua
 RustcoreUI.lua

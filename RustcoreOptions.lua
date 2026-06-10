@@ -120,6 +120,7 @@ local function RefreshCombatLockState(frame)
         frame.cbGuildMessage,
         frame.cbShowPopup,
         frame.cbShowWarning,
+        frame.cbStats,
     }
     for _, control in ipairs(controls) do
         if control then
@@ -256,20 +257,9 @@ local function BuildOptionsFrame()
     f.diffSlider = slider
     f.diffDesc   = diffDesc
 
-    -- ── Self-Found section ────────────────────────────────────────────────────
-    local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sfHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", -8, -26)
-    sfHeader:SetText("Self-Found")
-    ApplyBodyFont(sfHeader, 20)
-
-    local cbSelfFound = MakeCheckbox(f,
-        "Self-Found Mode",
-        "Blocks access to the mailbox, auction house, and player trading.",
-        sfHeader, -8, "selfFound")
-
     -- ── Exceptions section ────────────────────────────────────────────────────
     local excHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    excHeader:SetPoint("TOPLEFT", cbSelfFound, "BOTTOMLEFT", 0, -16)
+    excHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", -8, -26)
     excHeader:SetText("Exceptions")
     ApplyBodyFont(excHeader, 20)
 
@@ -301,9 +291,25 @@ local function BuildOptionsFrame()
         "Show or hide the Rustcore minimap button.",
         uiHeader, -8, "showMinimapButton")
 
+    local cbStats = MakeCheckbox(f,
+        "Show Stats Window",
+        "Show or hide the Rustcore item loss stats window.",
+        cbMinimap, -8, "showStatsWindow")
+
+    -- ── Self-Found section ────────────────────────────────────────────────────
+    local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sfHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", rightColX - leftColX - 8, -26)
+    sfHeader:SetText("Self-Found")
+    ApplyBodyFont(sfHeader, 20)
+
+    local cbSelfFound = MakeCheckbox(f,
+        "Self-Found Mode",
+        "Blocks access to the mailbox, auction house, and player trading.",
+        sfHeader, -8, "selfFound")
+
     -- ── Death broadcast section ───────────────────────────────────────────────
     local bcHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bcHeader:SetPoint("TOPLEFT", sfHeader, "TOPLEFT", rightColX - leftColX, 0)
+    bcHeader:SetPoint("TOPLEFT", cbSelfFound, "BOTTOMLEFT", 0, -16)
     bcHeader:SetText("Death Broadcast")
     ApplyBodyFont(bcHeader, 20)
 
@@ -349,6 +355,7 @@ local function BuildOptionsFrame()
     f.cbGuildMessage= cbGuildMessage
     f.cbShowPopup   = cbShowPopup
     f.cbShowWarning = cbShowWarning
+    f.cbStats       = cbStats
 
     f:SetScript("OnShow", function(self)
         local v = Rustcore.GetSetting("difficulty")
@@ -365,6 +372,7 @@ local function BuildOptionsFrame()
         self.cbGuildMessage:Refresh()
         self.cbShowPopup:Refresh()
         self.cbShowWarning:Refresh()
+        self.cbStats:Refresh()
 
         local count = RustcoreUI.GetPendingCount()
         if count > 0 then

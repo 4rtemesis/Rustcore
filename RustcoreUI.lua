@@ -738,7 +738,7 @@ local function SyncPendingDeletionDB()
         RustcoreDB.pendingDeletion = {}
         RustcoreDB.pendingDeletionOwner = Rustcore.GetCharacterKey and Rustcore.GetCharacterKey() or RustcoreDB.pendingDeletionOwner
         for i, item in ipairs(pendingItems) do
-            RustcoreDB.pendingDeletion[i] = { slot=item.slot, link=item.link, name=item.name, tex=item.tex }
+            RustcoreDB.pendingDeletion[i] = { slot=item.slot, link=item.link, name=item.name, tex=item.tex, ilvl=item.ilvl }
         end
     else
         RustcoreDB.pendingDeletion = nil
@@ -859,6 +859,7 @@ function RustcoreUI.ShowDeletionFrame(items, snapshotItems)
             link = item.link,
             name = item.name,
             tex  = GetDisplayTexture(item),
+            ilvl = item.ilvl,
         }
     end
     awaitingConfirmation = false
@@ -925,7 +926,16 @@ FinishQueue = function()
     RefreshButtonState()
 end
 
-RemoveFirstPendingItem = function()
+local function CountDestroyedItem(item)
+    if RustcoreStats and RustcoreStats.RegisterDestroyedItem then
+        RustcoreStats.RegisterDestroyedItem(item)
+    end
+end
+
+RemoveFirstPendingItem = function(countDestroyed)
+    if countDestroyed then
+        CountDestroyedItem(pendingItems[1])
+    end
     table.remove(pendingItems, 1)
     SyncPendingDeletionDB()
     awaitingConfirmation = false
@@ -1002,7 +1012,7 @@ ResolveDeletionWithRetry = function(item, remaining, delay)
             if CursorHasItem() then
                 ClearCursor()
             end
-            RemoveFirstPendingItem()
+            RemoveFirstPendingItem(true)
             return
         end
         if (remaining or 0) > 0 then
@@ -1030,7 +1040,7 @@ ResolveProcessingState = function()
     if not equippedLink and not bag then
         cursorArmed = false
         awaitingConfirmation = false
-        RemoveFirstPendingItem()
+        RemoveFirstPendingItem(true)
         return
     end
 
@@ -1220,7 +1230,7 @@ function RustcoreUI.ExecuteDeletion()
         if not equippedLink and not bag then
             awaitingConfirmation = false
             cursorArmed = false
-            RemoveFirstPendingItem()
+            RemoveFirstPendingItem(true)
         else
             print("|cffff4444Rustcore:|r That item is still present. Confirm the popup, then click again if needed.")
         end

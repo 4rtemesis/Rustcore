@@ -17,6 +17,7 @@ files=(
   "Rustcore.lua"
   "RustcoreBroadcast.lua"
   "RustcoreTheme.lua"
+  "RustcoreStats.lua"
   "RustcoreOptions.lua"
   "RustcoreUI.lua"
   "RCicon.png"
@@ -25,6 +26,10 @@ files=(
 cp "${source_dir}/RustcoreEra.toc" "${stage_dir}/Rustcore.toc"
 
 for file in "${files[@]}"; do
+  if [[ ! -s "${source_dir}/${file}" ]]; then
+    echo "Required package file is missing or empty: ${source_dir}/${file}" >&2
+    exit 1
+  fi
   cp "${source_dir}/${file}" "${stage_dir}/"
 done
 
