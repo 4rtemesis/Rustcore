@@ -12,3 +12,4 @@ RustcoreTheme.lua
 RustcoreStats.lua
 RustcoreOptions.lua
 RustcoreUI.lua
+RustcoreRusted.lua
