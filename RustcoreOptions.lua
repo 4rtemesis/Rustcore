@@ -16,10 +16,10 @@ local DIFF_DESCS  = {
 
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 local DEFAULT_TITLE_TEXT = "Rustcore Options"
-local COMBAT_TITLE_TEXT = "Settings are locked\nwhile in combat."
-local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/Ynsect Moksha.ttf")
+local COMBAT_TITLE_TEXT = "Settings are locked\nwhile in combat"
+local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
-local TITLE_COLOR = { 0.90, 0.12, 0.12 }
+local TITLE_COLOR = { 0.85, 0.15, 0.15 }
 
 local function ApplyBodyFont(fontString, size)
     if not fontString then return end
@@ -159,8 +159,8 @@ local function BuildOptionsFrame()
     title:SetPoint("TOP", f, "TOP", 0, -32)
     title:SetFont(TITLE_FONT_PATH, 30, "")
     title:SetTextColor(unpack(TITLE_COLOR))
-    title:SetShadowColor(0, 0, 0, 1)
-    title:SetShadowOffset(2.5, -2.5)
+    title:SetShadowColor(0, 0, 0, 0.6)
+    title:SetShadowOffset(1, -1)
     title:SetText(DEFAULT_TITLE_TEXT)
     f.titleText = title
 

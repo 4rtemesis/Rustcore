@@ -30,9 +30,9 @@ local LinksMatch
 local spinCompleteCallback
 
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
-local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/Ynsect Moksha.ttf")
+local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
-local TITLE_COLOR = { 0.90, 0.12, 0.12 }
+local TITLE_COLOR = { 0.85, 0.15, 0.15 }
 local ICON_TEX_INSET = 0.10
 local ICON_IMAGE_SIZE = 32
 local ICON_BORDER_SIZE = 60
@@ -40,7 +40,7 @@ local COMPACT_ICON_BG_SIZE = ICON_IMAGE_SIZE - 2
 local ICON_Y_OFFSET = 0
 local COMPACT_CELL_GAP = 6
 local COMPACT_FRAME_MIN_WIDTH = 280
-local COMPACT_FRAME_MIN_HEIGHT = 210
+local COMPACT_FRAME_MIN_HEIGHT = 250
 
 local function ApplyBodyFont(fontString, size)
     if not fontString then return end
@@ -88,7 +88,7 @@ local WHEEL_FRAME_W = RoundPixel(WHEEL_FRAME_SOURCE_W * WHEEL_FRAME_SCALE)
 local WHEEL_FRAME_H = RoundPixel(WHEEL_FRAME_SOURCE_H * WHEEL_FRAME_SCALE)
 local WHEEL_FRAME_ICON_X = RoundPixel((WHEEL_FRAME_SOURCE_PAD_LEFT * WHEEL_FRAME_SCALE) + ((WHEEL_FRAME_STRIP_W - STRIP_W) / 2))
 local WHEEL_FRAME_ICON_Y = RoundPixel(WHEEL_FRAME_PAD_TOP * WHEEL_FRAME_SCALE) + 2
-local WHEEL_FRAME_TOP_OFFSET = -88
+local WHEEL_FRAME_TOP_OFFSET = -108
 
 local function RunSpinCompleteCallback(delay)
     if not spinCompleteCallback then return end
@@ -421,11 +421,11 @@ local function BuildFrame()
     RustcoreTheme.ApplyFrameSkin(f)
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", f, "TOP", 0, -28)
-    title:SetFont(TITLE_FONT_PATH, 22, "")
+    title:SetPoint("TOP", f, "TOP", 0, -26)
+    title:SetFont(TITLE_FONT_PATH, 30, "")
     title:SetTextColor(unpack(TITLE_COLOR))
-    title:SetShadowColor(0, 0, 0, 1)
-    title:SetShadowOffset(2.5, -2.5)
+    title:SetShadowColor(0, 0, 0, 0.6)
+    title:SetShadowOffset(1, -1)
     title:SetText("Death Penalty")
     f.title = title
 
@@ -471,11 +471,14 @@ local function BuildFrame()
     ApplyBodyFont(statusMsg, 16)
     f.statusMsg = statusMsg
 
-    -- Delete button
-    local btn = CreateFrame("Button", "RustcoreDeletionButton", f, "UIPanelButtonTemplate")
-    btn:SetSize(200, 40)
+    -- Delete button (plain frame — no UIPanelButtonTemplate so its built-in textures don't bleed through)
+    local btn = CreateFrame("Button", "RustcoreDeletionButton", f)
+    btn:SetSize(200, 75)
+    local btnLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    btnLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    btn:SetFontString(btnLabel)
     btn:SetScript("OnClick", RustcoreUI.ExecuteDeletion)
-    RustcoreTheme.SkinButton(btn)
+    RustcoreTheme.SkinDeleteButton(btn)
     ApplyBodyFont(btn:GetFontString(), 18)
     f.deleteBtn = btn
     btn:Hide()
@@ -508,6 +511,8 @@ ClearSpinRows = function()
     end
     wipe(f.spinRows)
     for _, iconFrame in ipairs(f.compactIcons or {}) do
+        if iconFrame.fallTimer  then iconFrame.fallTimer:Cancel();  iconFrame.fallTimer  = nil end
+        if iconFrame.fallTicker then iconFrame.fallTicker:Cancel(); iconFrame.fallTicker = nil end
         iconFrame:Hide()
         iconFrame:SetParent(nil)
     end
@@ -536,7 +541,7 @@ PopulateSpinUI = function(items, skipAnim)
         local totalW = columns * ICON_SIZE + (columns - 1) * COMPACT_CELL_GAP
         local totalH = rowsInTallestColumn * ICON_SIZE + math.max(0, rowsInTallestColumn - 1) * COMPACT_CELL_GAP
         local frameW = math.max(totalW + 86, COMPACT_FRAME_MIN_WIDTH)
-        local frameH = math.max(totalH + 190, COMPACT_FRAME_MIN_HEIGHT)
+        local frameH = math.max(totalH + 230, COMPACT_FRAME_MIN_HEIGHT)
 
         f:SetSize(frameW, frameH)
         f:ClearAllPoints()
@@ -563,6 +568,8 @@ PopulateSpinUI = function(items, skipAnim)
             local cell = CreateFrame("Frame", nil, f.rowContainer)
             cell:SetSize(ICON_SIZE, ICON_SIZE)
             cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", xOff, yOff)
+            cell._fallX = xOff
+            cell._fallY = yOff
 
             local bg = cell:CreateTexture(nil, "BACKGROUND")
             bg:SetSize(COMPACT_ICON_BG_SIZE, COMPACT_ICON_BG_SIZE)
@@ -596,6 +603,59 @@ PopulateSpinUI = function(items, skipAnim)
             f.compactIcons[#f.compactIcons + 1] = cell
         end
 
+        if not skipAnim then
+            -- shuffle fall order so each icon lands at a random time
+            local fallOrder = {}
+            for i = 1, itemCount do fallOrder[i] = i end
+            for i = itemCount, 2, -1 do
+                local j = math.random(1, i)
+                fallOrder[i], fallOrder[j] = fallOrder[j], fallOrder[i]
+            end
+
+            local FALL_HEIGHT    = 110
+            local FALL_DURATION  = 0.22
+            local SOUND_LEAD_IN  = 0.1  -- play crash sound this many seconds before landing
+
+            for pos, idx in ipairs(fallOrder) do
+                local cell  = f.compactIcons[idx]
+                local cxOff = cell._fallX
+                local cyOff = cell._fallY
+                local startY = cyOff + FALL_HEIGHT
+
+                cell:ClearAllPoints()
+                cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, startY)
+                cell:SetAlpha(0)
+
+                local delay = math.max((pos - 1) * 0.3, 0.016)
+                cell.fallTimer = C_Timer.NewTicker(delay, function(self)
+                    self:Cancel()
+                    cell.fallTimer = nil
+                    if not cell:GetParent() then return end
+                    cell:SetAlpha(1)
+                    local t0 = GetTime()
+                    local soundPlayed = false
+                    cell.fallTicker = C_Timer.NewTicker(0.016, function(ticker)
+                        if not cell:GetParent() then ticker:Cancel(); return end
+                        local elapsed = GetTime() - t0
+                        if not soundPlayed and elapsed >= FALL_DURATION - SOUND_LEAD_IN then
+                            soundPlayed = true
+                            PlaySoundFile(Rustcore.GetAssetPath("Audio/crash" .. math.random(1, 5) .. ".wav"), "Master")
+                        end
+                        if elapsed >= FALL_DURATION then
+                            ticker:Cancel()
+                            cell.fallTicker = nil
+                            cell:ClearAllPoints()
+                            cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, cyOff)
+                            return
+                        end
+                        local t = elapsed / FALL_DURATION
+                        cell:ClearAllPoints()
+                        cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, startY + (cyOff - startY) * (t * t))
+                    end)
+                end, 1)
+            end
+        end
+
         f.deleteBtn:ClearAllPoints()
         f.deleteBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 36)
         RefreshButtonState()
@@ -613,7 +673,7 @@ PopulateSpinUI = function(items, skipAnim)
     local rowsInTallestColumn = math.min(itemCount, rowsPerColumn)
     local totalH = rowsInTallestColumn * (rowH + ROW_SPACING) - ROW_SPACING
     local totalW = columnCount * WHEEL_FRAME_W + (columnCount - 1) * COLUMN_SPACING
-    local frameH = totalH + 190
+    local frameH = totalH + 230
 
     f:SetSize(totalW + 60, frameH)
     f:ClearAllPoints()
@@ -700,11 +760,8 @@ RefreshButtonState = function()
             f.statusMsg:Hide()
         end
         if f.deleteBtn then
-            f.deleteBtn:SetText("Resurrect to delete")
-            f.deleteBtn:GetNormalTexture() -- ensure template rendered
+            f.deleteBtn:SetText("")
             f.deleteBtn:Disable()
-            -- Grey out visually
-            if f.deleteBtn.SetDisabledTexture then end
             f.deleteBtn:Show()
         end
         return
@@ -718,13 +775,13 @@ RefreshButtonState = function()
     end
 
     if processingTicker or CursorHasItem() or GetDeletePopupFrame() then
+        f.deleteBtn:Enable()
+        f.deleteBtn:Show()
         return
     end
 
-    f.deleteBtn:SetText("Delete next item")
+    f.deleteBtn:SetText("")
     f.deleteBtn:Enable()
-    -- Red tint
-    f.deleteBtn:GetNormalTexture()
     f.deleteBtn:Show()
 end
 
@@ -839,7 +896,7 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
-function RustcoreUI.ShowDeletionFrame(items, snapshotItems)
+function RustcoreUI.ShowDeletionFrame(items, snapshotItems, skipAnim)
     local sourceItems = {}
     local reuseSpinIcons = (items == pendingItems and activeSpinIcons and #activeSpinIcons > 0)
     for _, item in ipairs(items) do
@@ -867,13 +924,16 @@ function RustcoreUI.ShowDeletionFrame(items, snapshotItems)
     SyncPendingDeletionDB()
 
     local f = EnsureFrame()
+    if Rustcore.GetSetting("difficulty") == 5 then
+        f.isMinimized = true
+    end
     RustcoreTheme.SetDifficultyBackground(f, Rustcore.GetSetting("difficulty"))
     if f.subLabel then
         local src = RustcoreDB and RustcoreDB.lastDeathSource
         f.subLabel:SetText(src and ("Killed by: " .. src) or "")
     end
 
-    PopulateSpinUI(pendingItems)
+    PopulateSpinUI(pendingItems, skipAnim)
     PlaySoundFile(Rustcore.GetAssetPath("Audio/Metalsound.wav"), "Master")
     RestoreFrameVisualState()
     RefreshButtonState()
@@ -984,7 +1044,8 @@ end
 local function HideProcessingFrame()
     if deleteFrame and deleteFrame.deleteBtn then
         savedBtnX, savedBtnY = deleteFrame.deleteBtn:GetCenter()
-        deleteFrame.deleteBtn:Hide()
+        deleteFrame.deleteBtn:Enable()
+        deleteFrame.deleteBtn:Show()
     end
 end
 
@@ -1184,6 +1245,7 @@ local function BeginMoveMonitor()
 end
 
 function RustcoreUI.ExecuteDeletion()
+    if processingTicker then return end
     if UnitIsDeadOrGhost("player") then
         print("|cffff4444Rustcore:|r You must resurrect before deleting queued items.")
         return
@@ -1289,7 +1351,7 @@ function RustcoreUI.OnResurrect(source, snapshotItems)
         RestoreFrameVisualState()
         RefreshButtonState()
     else
-        RustcoreUI.ShowDeletionFrame(source, snapshotItems)
+        RustcoreUI.ShowDeletionFrame(source, snapshotItems, true)
     end
 end
 
@@ -1300,7 +1362,7 @@ function RustcoreUI.ReopenDeletionFrame()
         print("|cffff4444Rustcore:|r No pending death penalty items.")
         return
     end
-    RustcoreUI.ShowDeletionFrame(source, RustcoreDB.pendingDeletionSnapshot)
+    RustcoreUI.ShowDeletionFrame(source, RustcoreDB.pendingDeletionSnapshot, true)
 end
 
 do

@@ -10,7 +10,7 @@ local EDGE_CENTER_OFFSET = 1
 local HORIZONTAL_EDGE_HEIGHT = 18
 local VERTICAL_EDGE_WIDTH = 18
 local BUTTON_TEXT_OFFSET_Y = -1
-local SLIDER_THUMB_WIDTH = 9
+local SLIDER_THUMB_WIDTH = 14
 local SLIDER_THUMB_HEIGHT = 36
 local EXIT_BUTTON_SIZE = 22
 local FRAME_BACKGROUND_ALPHA = 0.78
@@ -158,6 +158,42 @@ function RustcoreTheme.SkinButton(button)
     EnsureButtonState(button)
 end
 
+function RustcoreTheme.SkinDeleteButton(button)
+    if button.rustcoreDeleteBtnSkin then
+        EnsureButtonState(button)
+        return
+    end
+
+    button:SetNormalTexture(Asset("Deletebutton.tga"))
+    button:SetPushedTexture(Asset("Deletebuttonpressed.tga"))
+    button:SetDisabledTexture(Asset("deletebuttonwait copy.tga"))
+    button:SetPushedTextOffset(0, BUTTON_TEXT_OFFSET_Y)
+
+    local normal   = button:GetNormalTexture()
+    local pushed   = button:GetPushedTexture()
+    local disabled = button:GetDisabledTexture()
+
+    if normal   then normal:SetAllPoints(button)   end
+    if pushed   then pushed:SetAllPoints(button)   end
+    if disabled then
+        disabled:ClearAllPoints()
+        disabled:SetPoint("TOPLEFT",     button, "TOPLEFT",     -10, 0)
+        disabled:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -10, 0)
+    end
+
+    button:SetHighlightTexture(Asset("deletebuttonhighlight copy.tga"))
+    local hl = button:GetHighlightTexture()
+    if hl then
+        hl:SetAllPoints(button)
+        hl:SetVertexColor(1, 1, 1, 0.55)
+    end
+
+    button:HookScript("OnEnable", EnsureButtonState)
+    button:HookScript("OnDisable", EnsureButtonState)
+    button.rustcoreDeleteBtnSkin = true
+    EnsureButtonState(button)
+end
+
 function RustcoreTheme.SkinExitButton(button)
     if button.rustcoreThemeExitSkin then return end
 
@@ -289,9 +325,9 @@ function RustcoreTheme.SkinSlider(slider, width, trackYOffset)
     local track = slider:CreateTexture(nil, "BACKGROUND")
     track:SetPoint("CENTER", slider, "CENTER", 0, trackYOffset or -1)
     track:SetSize(width, 24)
-    ApplyTexture(track, Asset("Rustcore-texture-slider-1.tga"))
+    ApplyTexture(track, Asset("Rustcore-texture-slider-1 copy.tga"))
 
-    slider:SetThumbTexture(Asset("Rustcore-texture-sliderhandle-1.tga"))
+    slider:SetThumbTexture(Asset("Rustcore-texture-sliderhandle-2.tga"))
     local thumb = slider:GetThumbTexture()
     if thumb then
         thumb:SetSize(SLIDER_THUMB_WIDTH, SLIDER_THUMB_HEIGHT)
