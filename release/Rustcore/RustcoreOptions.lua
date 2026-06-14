@@ -1,0 +1,416 @@
+-- Rustcore: Options window
+-- Accessible via /rustcore or /rc
+
+RustcoreOptions = {}
+
+local optFrame
+
+local DIFF_LABELS = { [1]="Lite", [2]="Normal", [3]="Hard", [4]="Brutal", [5]="Extreme" }
+local DIFF_DESCS  = {
+    [1] = "Only repair is blocked. No items are lost on death.",
+    [2] = "Lose 1 random equipped item on death.",
+    [3] = "Lose 25% of your equipped items on death (rounded up).",
+    [4] = "Lose 50% of your equipped items on death (rounded up).",
+    [5] = "Lose every equipped item on death.",
+} 
+
+local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
+local DEFAULT_TITLE_TEXT = "Rustcore Options"
+local COMBAT_TITLE_TEXT = "Settings are locked\nwhile in combat"
+local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
+local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
+local TITLE_COLOR = { 0.85, 0.15, 0.15 }
+
+local function ApplyBodyFont(fontString, size)
+    if not fontString then return end
+    fontString:SetFont(BODY_FONT_PATH, math.max(10, (size or 18) - 2), "")
+end
+
+local function SettingsLocked()
+    return Rustcore and Rustcore.SettingsLocked and Rustcore.SettingsLocked()
+end
+
+local function ApplyDifficultyValue(slider, diffDesc, value)
+    local v = math.max(1, math.min(5, math.floor(value + 0.5)))
+    local previous = Rustcore.GetSetting("difficulty")
+    if math.abs((slider:GetValue() or v) - v) > 0.001 then
+        slider:SetValue(v)
+        return
+    end
+
+    if previous == v then
+        local txt = _G[slider:GetName().."Text"]
+        if txt then txt:SetText(DIFF_LABELS[v]) end
+        diffDesc:SetText(DIFF_DESCS[v])
+        local parent = slider:GetParent()
+        if parent then
+            RustcoreTheme.SetDifficultyBackground(parent, v)
+        end
+        return
+    end
+
+    if not Rustcore.SetSetting("difficulty", v) then
+        local current = Rustcore.GetSetting("difficulty")
+        if math.abs((slider:GetValue() or current) - current) > 0.001 then
+            slider:SetValue(current)
+        end
+        return
+    end
+    PlaySoundFile(Rustcore.GetAssetPath("Audio/difficultysound.wav"), "Master")
+    local txt = _G[slider:GetName().."Text"]
+    if txt then txt:SetText(DIFF_LABELS[v]) end
+    diffDesc:SetText(DIFF_DESCS[v])
+    local parent = slider:GetParent()
+    if parent then
+        RustcoreTheme.SetDifficultyBackground(parent, v)
+    end
+end
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function MakeCheckbox(parent, labelText, tooltipText, anchorTo, yOff, settingKey)
+    local cb = CreateFrame("CheckButton", nil, parent)
+    cb:SetSize(26, 26)
+    cb:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, yOff)
+
+    RustcoreTheme.SkinCheckbox(cb)
+
+    local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    lbl:SetText(labelText)
+    ApplyBodyFont(lbl, 17)
+
+    if tooltipText then
+        cb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(tooltipText, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    cb:SetScript("OnClick", function(self)
+        PlaySoundFile(Rustcore.GetAssetPath("Audio/ticksound2.wav"), "Master")
+        if not Rustcore.SetSetting(settingKey, self:GetChecked() and true or false) then
+            cb:Refresh()
+        end
+    end)
+
+    cb.Refresh = function()
+        cb:SetChecked(Rustcore.GetSetting(settingKey))
+    end
+
+    return cb
+end
+
+local function RefreshCombatLockState(frame)
+    local locked = SettingsLocked()
+    if frame.diffSlider then
+        if locked then frame.diffSlider:Disable() else frame.diffSlider:Enable() end
+        frame.diffSlider:SetAlpha(locked and 0.5 or 1)
+    end
+
+    local controls = {
+        frame.cbSelfFound,
+        frame.cbWeapon,
+        frame.cbRepair,
+        frame.cbPvpDeathProtection,
+        frame.cbMinimap,
+        frame.cbBroadcast,
+        frame.cbGuildMessage,
+        frame.cbShowPopup,
+        frame.cbShowWarning,
+        frame.cbStats,
+    }
+    for _, control in ipairs(controls) do
+        if control then
+            if locked then control:Disable() else control:Enable() end
+            control:SetAlpha(locked and 0.5 or 1)
+        end
+    end
+
+    if frame.combatNote then
+        if locked then
+            if frame.titleText then
+                frame.titleText:SetText(COMBAT_TITLE_TEXT)
+            end
+            frame.combatNote:Show()
+        else
+            if frame.titleText then
+                frame.titleText:SetText(DEFAULT_TITLE_TEXT)
+            end
+            frame.combatNote:Hide()
+        end
+    end
+end
+
+-- ── Frame construction ────────────────────────────────────────────────────────
+
+local function BuildOptionsFrame()
+    local f = CreateFrame("Frame", "RustcoreOptionsFrame", UIParent, backdropTemplate)
+    f:SetSize(580, 584)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    RustcoreTheme.ApplyFrameSkin(f)
+
+    -- Title
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", f, "TOP", 0, -32)
+    title:SetFont(TITLE_FONT_PATH, 30, "")
+    title:SetTextColor(unpack(TITLE_COLOR))
+    title:SetShadowColor(0, 0, 0, 0.6)
+    title:SetShadowOffset(1, -1)
+    title:SetText(DEFAULT_TITLE_TEXT)
+    f.titleText = title
+
+    local bgShade = f:CreateTexture(nil, "ARTWORK")
+    bgShade:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -18)
+    bgShade:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 18)
+    bgShade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    bgShade:SetVertexColor(0, 0, 0, 0.10)
+
+    local dragHandle = CreateFrame("Frame", nil, f)
+    dragHandle:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    dragHandle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -36, -10)
+    dragHandle:SetHeight(28)
+    dragHandle:EnableMouse(true)
+    dragHandle:RegisterForDrag("LeftButton")
+    dragHandle:SetScript("OnDragStart", function() f:StartMoving() end)
+    dragHandle:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+
+    local closeBtn = CreateFrame("Button", nil, f)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -6)
+    closeBtn:SetFrameLevel(f:GetFrameLevel() + 10)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+    RustcoreTheme.SkinExitButton(closeBtn)
+
+    local leftColX = 34
+    local rightColX = 290
+
+    -- ── Difficulty section ────────────────────────────────────────────────────
+    local diffHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    diffHeader:SetPoint("TOP", title, "BOTTOM", 0, -30)
+    diffHeader:SetJustifyH("CENTER")
+    diffHeader:SetText("Difficulty Mode")
+    ApplyBodyFont(diffHeader, 20)
+    f.diffHeader = diffHeader
+
+    -- Five-step slider (1=Lite, 2=Normal, 3=Hard, 4=Brutal, 5=Extreme)
+    local slider = CreateFrame("Slider", "RustcoreDifficultySlider", f, "OptionsSliderTemplate")
+    slider:SetPoint("TOP", diffHeader, "BOTTOM", 0, -34)
+    slider:SetWidth(342)
+    slider:SetMinMaxValues(1, 5)
+    slider:SetValueStep(1)
+    local sliderTrack = RustcoreTheme.SkinSlider(slider, 376, -1)
+
+    local sliderLow  = _G[slider:GetName().."Low"]
+    local sliderHigh = _G[slider:GetName().."High"]
+    local sliderText = _G[slider:GetName().."Text"]
+    if sliderLow then
+        sliderLow:SetText("Lite")
+        sliderLow:ClearAllPoints()
+        sliderLow:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 10, -6)
+        ApplyBodyFont(sliderLow, 16)
+    end
+    if sliderHigh then
+        sliderHigh:SetText("Extreme")
+        sliderHigh:ClearAllPoints()
+        sliderHigh:SetPoint("TOPRIGHT", sliderTrack, "BOTTOMRIGHT", -10, -6)
+        ApplyBodyFont(sliderHigh, 16)
+    end
+    if sliderText then
+        sliderText:SetText(DIFF_LABELS[Rustcore.GetSetting("difficulty")])
+        sliderText:ClearAllPoints()
+        sliderText:SetPoint("TOP", diffHeader, "BOTTOM", 0, -10)
+        sliderText:SetJustifyH("CENTER")
+        sliderText:SetWidth(110)
+        ApplyBodyFont(sliderText, 18)
+    end
+    f.sliderText = sliderText
+
+    local diffDesc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    diffDesc:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 8, -26)
+    diffDesc:SetWidth(420)
+    diffDesc:SetJustifyH("LEFT")
+    diffDesc:SetTextColor(1, 0.82, 0)
+    diffDesc:SetText(DIFF_DESCS[Rustcore.GetSetting("difficulty")])
+    ApplyBodyFont(diffDesc, 18)
+
+    local combatNote = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    combatNote:SetPoint("BOTTOMLEFT", diffHeader, "TOPLEFT", -150, 8)
+    combatNote:SetWidth(480)
+    combatNote:SetJustifyH("LEFT")
+    combatNote:SetWordWrap(true)
+    combatNote:Hide()
+    ApplyBodyFont(combatNote, 16)
+    f.combatNote = combatNote
+
+    slider:SetScript("OnValueChanged", function(self, value)
+        ApplyDifficultyValue(self, diffDesc, value)
+    end)
+    slider:SetScript("OnMouseUp", function(self)
+        ApplyDifficultyValue(self, diffDesc, self:GetValue())
+    end)
+    slider:SetValue(Rustcore.GetSetting("difficulty"))
+
+    f.diffSlider = slider
+    f.diffDesc   = diffDesc
+
+    -- ── Exceptions section ────────────────────────────────────────────────────
+    local excHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    excHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", -8, -26)
+    excHeader:SetText("Exceptions")
+    ApplyBodyFont(excHeader, 20)
+
+    local cbWeapon = MakeCheckbox(f,
+        "Keep Main Weapon",
+        "Spares your main weapon from deletion.\n"
+        .."Hunter: Ranged slot\n"
+        .."Melee (Warrior/Paladin/Rogue/Shaman/Druid): Main Hand\n"
+        .."Caster (Priest/Mage/Warlock): Wand if equipped, else Main Hand",
+        excHeader, -8, "keepMainWeapon")
+
+    local cbRepair = MakeCheckbox(f,
+        "Allow Item Repair",
+        "Allows repair at merchants. By default repair is always blocked.",
+        cbWeapon, -8, "allowRepair")
+
+    local cbPvpDeathProtection = MakeCheckbox(f,
+        "Ignore PVP Death",
+        "If an enemy player damages you at any point during a combat, dying in the same combat will not mark any items for deletion.",
+        cbRepair, -8, "ignoreDeathAfterEnemyPlayerDamage")
+
+    local uiHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    uiHeader:SetPoint("TOPLEFT", cbPvpDeathProtection, "BOTTOMLEFT", 0, -16)
+    uiHeader:SetText("Interface")
+    ApplyBodyFont(uiHeader, 20)
+
+    local cbMinimap = MakeCheckbox(f,
+        "Show Minimap Button",
+        "Show or hide the Rustcore minimap button.",
+        uiHeader, -8, "showMinimapButton")
+
+    local cbStats = MakeCheckbox(f,
+        "Show Stats Window",
+        "Show or hide the Rustcore item loss stats window.",
+        cbMinimap, -8, "showStatsWindow")
+
+    -- ── Self-Found section ────────────────────────────────────────────────────
+    local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sfHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", rightColX - leftColX - 8, -26)
+    sfHeader:SetText("Self-Found")
+    ApplyBodyFont(sfHeader, 20)
+
+    local cbSelfFound = MakeCheckbox(f,
+        "Self-Found Mode",
+        "Blocks access to the mailbox, auction house, and player trading.",
+        sfHeader, -8, "selfFound")
+
+    -- ── Death broadcast section ───────────────────────────────────────────────
+    local bcHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bcHeader:SetPoint("TOPLEFT", cbSelfFound, "BOTTOMLEFT", 0, -16)
+    bcHeader:SetText("Death Broadcast")
+    ApplyBodyFont(bcHeader, 20)
+
+    local cbBroadcast = MakeCheckbox(f,
+        "Broadcast My Death",
+        "Announces your death and the item you lost to other Rustcore users.",
+        bcHeader, -8, "broadcastDeaths")
+
+    local cbGuildMessage = MakeCheckbox(f,
+        "Guild Message",
+        "Send a message in guild chat when you die with the item you lost.",
+        cbBroadcast, -8, "guildDeathMessage")
+
+    local cbShowPopup = MakeCheckbox(f,
+        "Show Death Messages",
+        "Display a chat message when another Rustcore player dies.",
+        cbGuildMessage, -8, "showDeathPopup")
+
+    local cbShowWarning = MakeCheckbox(f,
+        "Show Center Warning",
+        "Display a center-screen raid warning when another Rustcore player dies.",
+        cbShowPopup, -8, "showDeathWarning")
+
+    -- ── Death penalty recovery ────────────────────────────────────────────────
+    local queueBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    queueBtn:SetSize(230, 40)
+    queueBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 28)
+    queueBtn:SetScript("OnClick", function()
+        f:Hide()
+        RustcoreUI.ReopenDeletionFrame()
+    end)
+    RustcoreTheme.SkinButton(queueBtn)
+    ApplyBodyFont(queueBtn:GetFontString(), 17)
+    f.queueBtn = queueBtn
+
+    -- Store refs for Refresh
+    f.cbSelfFound   = cbSelfFound
+    f.cbWeapon      = cbWeapon
+    f.cbRepair      = cbRepair
+    f.cbPvpDeathProtection = cbPvpDeathProtection
+    f.cbMinimap     = cbMinimap
+    f.cbBroadcast   = cbBroadcast
+    f.cbGuildMessage= cbGuildMessage
+    f.cbShowPopup   = cbShowPopup
+    f.cbShowWarning = cbShowWarning
+    f.cbStats       = cbStats
+
+    f:SetScript("OnShow", function(self)
+        local v = Rustcore.GetSetting("difficulty")
+        RustcoreTheme.SetDifficultyBackground(self, v)
+        self.diffSlider:SetValue(v)
+        if self.sliderText then self.sliderText:SetText(DIFF_LABELS[v]) end
+        self.diffDesc:SetText(DIFF_DESCS[v])
+        self.cbSelfFound:Refresh()
+        self.cbWeapon:Refresh()
+        self.cbRepair:Refresh()
+        self.cbPvpDeathProtection:Refresh()
+        self.cbMinimap:Refresh()
+        self.cbBroadcast:Refresh()
+        self.cbGuildMessage:Refresh()
+        self.cbShowPopup:Refresh()
+        self.cbShowWarning:Refresh()
+        self.cbStats:Refresh()
+
+        local count = RustcoreUI.GetPendingCount()
+        if count > 0 then
+            self.queueBtn:SetText("Show Pending Deletions")
+            self.queueBtn:Enable()
+        else
+            self.queueBtn:SetText("No Pending Deletions")
+            self.queueBtn:Disable()
+        end
+
+        RefreshCombatLockState(self)
+    end)
+
+    f:SetScript("OnUpdate", function(self)
+        if self._combatLocked ~= SettingsLocked() then
+            self._combatLocked = SettingsLocked()
+            RefreshCombatLockState(self)
+        end
+    end)
+
+    f:Hide()
+    return f
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
+
+function RustcoreOptions.Toggle()
+    if not optFrame then optFrame = BuildOptionsFrame() end
+    if optFrame:IsShown() then
+        optFrame:Hide()
+    else
+        PlaySoundFile(Rustcore.GetAssetPath("Audio/Metalsound.wav"), "Master")
+        optFrame:Show()
+    end
+end
+
+function RustcoreOptions.Hide()
+    if optFrame and optFrame:IsShown() then
+        optFrame:Hide()
+    end
+end

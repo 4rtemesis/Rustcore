@@ -41,6 +41,7 @@ local ICON_Y_OFFSET = 0
 local COMPACT_CELL_GAP = 6
 local COMPACT_FRAME_MIN_WIDTH = 280
 local COMPACT_FRAME_MIN_HEIGHT = 250
+local BROKEN_BORDER_SIZE = 36
 
 local function ApplyBodyFont(fontString, size)
     if not fontString then return end
@@ -173,7 +174,7 @@ end
 --   • a clip frame (masks the strip to STRIP_W wide)
 --   • inside: many icon textures arranged left-to-right
 
-local function BuildSpinRow(parent, xOffset, yOffset, targetSlot, targetTex, allIcons, chosenIndex)
+local function BuildSpinRow(parent, xOffset, yOffset, targetSlot, targetTex, targetLink, allIcons, chosenIndex)
     local step = ICON_SIZE + ICON_GAP
 
     -- Container for the whole row (wheel frame + strip)
@@ -205,13 +206,22 @@ local function BuildSpinRow(parent, xOffset, yOffset, targetSlot, targetTex, all
     selectedOverlay:Hide()
 
     local selectedOverlayBorder = CreateFrame("Frame", nil, clip)
-    selectedOverlayBorder:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
+    selectedOverlayBorder:SetSize(BROKEN_BORDER_SIZE, BROKEN_BORDER_SIZE)
     selectedOverlayBorder:SetPoint("CENTER", selectedOverlay, "CENTER", 0, 0)
     selectedOverlayBorder:SetFrameLevel(clip:GetFrameLevel() + 8)
     selectedOverlayBorder.tex = selectedOverlayBorder:CreateTexture(nil, "OVERLAY")
     selectedOverlayBorder.tex:SetAllPoints(selectedOverlayBorder)
-    selectedOverlayBorder.tex:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    selectedOverlayBorder.tex:SetTexture(Rustcore.GetAssetPath("UI/Brokenframe copy.tga"))
     selectedOverlayBorder:Hide()
+    selectedOverlayBorder:EnableMouse(true)
+    selectedOverlayBorder:SetScript("OnEnter", function(self)
+        if self:IsShown() and targetLink then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(targetLink)
+            GameTooltip:Show()
+        end
+    end)
+    selectedOverlayBorder:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Build icon pool inside clip: enough to wrap seamlessly
     local totalIcons = #allIcons
@@ -260,21 +270,24 @@ local function BuildSpinRow(parent, xOffset, yOffset, targetSlot, targetTex, all
     row.done        = false
     row.targetSlot  = targetSlot
     row.targetTex   = targetTex
+    row.targetLink  = targetLink
     row.chosenIndex = chosenIndex  -- index in allIcons[] of the chosen item
 
     return row
 end
 
-local function QueueCenterHighlight(row)
+local function QueueCenterHighlight(row, playSound)
     C_Timer.After(0, function()
         if not row or not row.selectedOverlay then return end
+        if row.selectedOverlayBorder then row.selectedOverlayBorder:Show() end
+        if playSound then
+            PlaySoundFile(Rustcore.GetAssetPath("Audio/cracksound.wav"), "Master")
+        end
         if row.isFirst and row.targetTex then
             row.selectedOverlay:SetTexture(row.targetTex)
             row.selectedOverlay:Show()
-            if row.selectedOverlayBorder then row.selectedOverlayBorder:Show() end
         else
             row.selectedOverlay:Hide()
-            if row.selectedOverlayBorder then row.selectedOverlayBorder:Hide() end
         end
     end)
 end
@@ -315,14 +328,13 @@ end
 -- Recomputes positions with the same math as UpdateRowPositions so the result
 -- is never stale from a previous SetPoint call.
 local function MarkCenterIcon(row)
+    if row.selectedOverlayBorder then row.selectedOverlayBorder:Show() end
     if row.selectedOverlay then
         if row.isFirst and row.targetTex then
             row.selectedOverlay:SetTexture(row.targetTex)
             row.selectedOverlay:Show()
-            if row.selectedOverlayBorder then row.selectedOverlayBorder:Show() end
         else
             row.selectedOverlay:Hide()
-            if row.selectedOverlayBorder then row.selectedOverlayBorder:Hide() end
         end
     end
 end
@@ -384,10 +396,8 @@ local function StartSpinAnimations(spinRows, onAllDone)
                     row.done     = true
                     row.spinning = false
                     UpdateRowPositions(row)
-                    if row.isFirst then
-                        MarkCenterIcon(row)
-                        QueueCenterHighlight(row)
-                    end
+                    MarkCenterIcon(row)
+                    QueueCenterHighlight(row, true)
                     doneCount = doneCount + 1
                     if doneCount >= #spinRows then
                         ticker:Cancel()
@@ -426,7 +436,7 @@ local function BuildFrame()
     title:SetTextColor(unpack(TITLE_COLOR))
     title:SetShadowColor(0, 0, 0, 0.6)
     title:SetShadowOffset(1, -1)
-    title:SetText("Death Penalty")
+    title:SetText("Broken")
     f.title = title
 
     local bgShade = f:CreateTexture(nil, "ARTWORK")
@@ -519,14 +529,13 @@ ClearSpinRows = function()
     wipe(f.compactIcons)
 end
 
-local function SnapRowToFinal(row, highlight)
+local function SnapRowToFinal(row, isFirstRow)
     local centerTarget = STRIP_W / 2 - ICON_SIZE / 2 - CENTER_ICON_OFFSET_X
     row.offset = (row.chosenIndex - 1) * row.step - centerTarget
+    row.isFirst = isFirstRow
     UpdateRowPositions(row)
-    if highlight then
-        MarkCenterIcon(row)
-        QueueCenterHighlight(row)
-    end
+    MarkCenterIcon(row)
+    QueueCenterHighlight(row)
 end
 
 PopulateSpinUI = function(items, skipAnim)
@@ -568,8 +577,19 @@ PopulateSpinUI = function(items, skipAnim)
             local cell = CreateFrame("Frame", nil, f.rowContainer)
             cell:SetSize(ICON_SIZE, ICON_SIZE)
             cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", xOff, yOff)
-            cell._fallX = xOff
-            cell._fallY = yOff
+            cell._fallX    = xOff
+            cell._fallY    = yOff
+            cell._itemLink = item.link
+
+            cell:EnableMouse(true)
+            cell:SetScript("OnEnter", function(self)
+                if self._itemLink and self._brokenBorder and self._brokenBorder:IsShown() then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetHyperlink(self._itemLink)
+                    GameTooltip:Show()
+                end
+            end)
+            cell:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
             local bg = cell:CreateTexture(nil, "BACKGROUND")
             bg:SetSize(COMPACT_ICON_BG_SIZE, COMPACT_ICON_BG_SIZE)
@@ -591,10 +611,20 @@ PopulateSpinUI = function(items, skipAnim)
             redOverlay:SetVertexColor(1, 0.15, 0.15, 1)
             redOverlay:SetShown(i == 1)
 
+            local brokenBorder = CreateFrame("Frame", nil, cell)
+            brokenBorder:SetSize(BROKEN_BORDER_SIZE, BROKEN_BORDER_SIZE)
+            brokenBorder:SetPoint("CENTER", cell, "CENTER", 0, 0)
+            brokenBorder:SetFrameLevel(cell:GetFrameLevel() + 4)
+            brokenBorder.tex = brokenBorder:CreateTexture(nil, "OVERLAY")
+            brokenBorder.tex:SetAllPoints(brokenBorder)
+            brokenBorder.tex:SetTexture(Rustcore.GetAssetPath("UI/Brokenframe copy.tga"))
+            brokenBorder:Hide()
+            cell._brokenBorder = brokenBorder
+
             local border = CreateFrame("Frame", nil, cell)
             border:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
             border:SetPoint("CENTER", cell, "CENTER", 0, 0)
-            border:SetFrameLevel(cell:GetFrameLevel() + 4)
+            border:SetFrameLevel(cell:GetFrameLevel() + 5)
             border.tex = border:CreateTexture(nil, "OVERLAY")
             border.tex:SetAllPoints(border)
             border.tex:SetTexture("Interface\\Buttons\\UI-Quickslot2")
@@ -646,6 +676,7 @@ PopulateSpinUI = function(items, skipAnim)
                             cell.fallTicker = nil
                             cell:ClearAllPoints()
                             cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, cyOff)
+                            if cell._brokenBorder then cell._brokenBorder:Show() end
                             return
                         end
                         local t = elapsed / FALL_DURATION
@@ -653,6 +684,12 @@ PopulateSpinUI = function(items, skipAnim)
                         cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, startY + (cyOff - startY) * (t * t))
                     end)
                 end, 1)
+            end
+        end
+
+        if skipAnim then
+            for _, c in ipairs(f.compactIcons) do
+                if c._brokenBorder then c._brokenBorder:Show() end
             end
         end
 
@@ -712,7 +749,7 @@ PopulateSpinUI = function(items, skipAnim)
         local xOff = columnIndex * (WHEEL_FRAME_W + COLUMN_SPACING)
         local yOff = -(rowIndex * (rowH + ROW_SPACING))
         local tex  = GetDisplayTexture(item)
-        local row  = BuildSpinRow(f.rowContainer, xOff, yOff, item.slot, tex, allIcons, chosenIdx)
+        local row  = BuildSpinRow(f.rowContainer, xOff, yOff, item.slot, tex, item.link, allIcons, chosenIdx)
         row.isFirst = (i == 1)
         row:Show()
         f.spinRows[i] = row

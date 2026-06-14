@@ -2,6 +2,7 @@ RustcoreRusted = RustcoreRusted or {}
 
 local rustedFrame        = nil
 local pendingRustedItems = {}
+local dismissedThisSession = {}  -- items dismissed this session; resets on relog/reload
 
 local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH  = Rustcore.GetAssetPath("Font/BPpong.otf")
@@ -11,14 +12,14 @@ local ICON_SIZE                = 38
 local COMPACT_CELL_GAP         = 6
 local ICON_IMAGE_SIZE          = 32
 local ICON_TEX_INSET           = 0.10
-local ICON_BORDER_SIZE         = 60
+local ICON_BORDER_SIZE         = 60   -- normal border (UI-Quickslot2)
+local RUSTED_OVERLAY_SIZE      = 40   -- rustedframe overlay (slightly smaller)
 local COMPACT_ICON_BG_SIZE     = ICON_IMAGE_SIZE - 2
 local MAX_ROWS_PER_COLUMN      = 9
 local COMPACT_FRAME_MIN_HEIGHT = 300
 local COMPACT_FRAME_MIN_WIDTH  = 280
 local ICON_ROW_OFFSET_Y        = -125
 
--- Equipped slots that can have durability
 local DURABLE_SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18 }
 
 -- ── Compat bag helpers ────────────────────────────────────────────────────────
@@ -49,15 +50,12 @@ local function GetItemID(link)
 end
 
 local function IsDismissed(itemID)
-    return itemID and RustcoreDB and RustcoreDB.rustedDismissed
-        and RustcoreDB.rustedDismissed[itemID] == true
+    return itemID and dismissedThisSession[itemID] == true
 end
 
 local function MarkDismissed(itemID)
     if not itemID then return end
-    if not RustcoreDB then return end
-    if not RustcoreDB.rustedDismissed then RustcoreDB.rustedDismissed = {} end
-    RustcoreDB.rustedDismissed[itemID] = true
+    dismissedThisSession[itemID] = true
 end
 
 local function IsAlreadyPending(itemID)
@@ -99,9 +97,9 @@ end
 local function UpdateSubLabel(f, count)
     if not f or not f.subLabel then return end
     if count and count > 1 then
-        f.subLabel:SetText("These items have rusted away and are no longer usable, do you wish to destroy them?")
+        f.subLabel:SetText("These items are no longer usable, do you wish to delete them?")
     else
-        f.subLabel:SetText("This item has rusted away and is no longer usable, do you wish to destroy it?")
+        f.subLabel:SetText("This item is no longer usable, do you want to delete it?")
     end
 end
 
@@ -110,8 +108,8 @@ end
 local function ClearRustedIcons()
     if not rustedFrame then return end
     for _, cell in ipairs(rustedFrame.compactIcons or {}) do
-        if cell.fallTimer  then cell.fallTimer:Cancel();  cell.fallTimer  = nil end
-        if cell.fallTicker then cell.fallTicker:Cancel(); cell.fallTicker = nil end
+        if cell.wipeTimer  then cell.wipeTimer:Cancel();  cell.wipeTimer  = nil end
+        if cell.wipeTicker then cell.wipeTicker:Cancel(); cell.wipeTicker = nil end
         cell:Hide()
         cell:SetParent(nil)
     end
@@ -144,6 +142,8 @@ local function PopulateRustedIcons(items, skipAnim)
     f.rowContainer:SetPoint("TOP", f, "TOP", 0, ICON_ROW_OFFSET_Y)
     f.rowContainer:SetWidth(totalW)
     f.rowContainer:SetHeight(totalH)
+
+    local rustedInset = (ICON_BORDER_SIZE - RUSTED_OVERLAY_SIZE) / 2
 
     for i, item in ipairs(items) do
         local col  = math.floor((i - 1) / rowsPerColumn)
@@ -182,67 +182,84 @@ local function PopulateRustedIcons(items, skipAnim)
         icon:SetTexture(item.tex or "Interface\\Icons\\INV_Misc_QuestionMark")
         icon:SetTexCoord(ICON_TEX_INSET, 1 - ICON_TEX_INSET, ICON_TEX_INSET, 1 - ICON_TEX_INSET)
 
+        local sepiaOverlay = cell:CreateTexture(nil, "OVERLAY")
+        sepiaOverlay:SetSize(ICON_IMAGE_SIZE, ICON_IMAGE_SIZE)
+        sepiaOverlay:SetPoint("CENTER", cell, "CENTER", 0, 0)
+        sepiaOverlay:SetTexture(item.tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+        sepiaOverlay:SetTexCoord(ICON_TEX_INSET, 1 - ICON_TEX_INSET, ICON_TEX_INSET, 1 - ICON_TEX_INSET)
+        sepiaOverlay:SetDesaturation(1)
+        sepiaOverlay:SetVertexColor(1.0, 0.5, 0.2, 1)
+        sepiaOverlay:SetShown(i == 1)
+
         local border = CreateFrame("Frame", nil, cell)
         border:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
         border:SetPoint("CENTER", cell, "CENTER", 0, 0)
-        border:SetFrameLevel(cell:GetFrameLevel() + 4)
-        border.tex = border:CreateTexture(nil, "OVERLAY")
-        border.tex:SetAllPoints(border)
-        border.tex:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+        border:SetFrameLevel(cell:GetFrameLevel() + 5)  -- normal border on top
+
+        -- Rusted overlay wipes in below the normal border
+        local rustedOverlay = CreateFrame("Frame", nil, cell)
+        rustedOverlay:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
+        rustedOverlay:SetPoint("CENTER", cell, "CENTER", 0, 0)
+        rustedOverlay:SetFrameLevel(cell:GetFrameLevel() + 4)
+
+        local normalBorderTex = border:CreateTexture(nil, "OVERLAY")
+        normalBorderTex:SetAllPoints(border)
+        normalBorderTex:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+
+        local rustedBorderTex = rustedOverlay:CreateTexture(nil, "OVERLAY")
+        rustedBorderTex:SetPoint("TOPLEFT", rustedOverlay, "TOPLEFT", rustedInset, -rustedInset)
+        rustedBorderTex:SetWidth(RUSTED_OVERLAY_SIZE)
+        rustedBorderTex:SetHeight(0)
+        rustedBorderTex:SetTexture(Rustcore.GetAssetPath("UI/rustedframe.tga"))
+        rustedBorderTex:SetTexCoord(0, 1, 0, 0)
+
+        cell._rustedBorderTex = rustedBorderTex
 
         cell:Show()
         f.compactIcons[#f.compactIcons + 1] = cell
     end
 
     if not skipAnim then
-        local fallOrder = {}
-        for i = 1, itemCount do fallOrder[i] = i end
-        for i = itemCount, 2, -1 do
-            local j = math.random(1, i)
-            fallOrder[i], fallOrder[j] = fallOrder[j], fallOrder[i]
-        end
+        local WIPE_DURATION = 0.5
 
-        local FALL_HEIGHT   = 110
-        local FALL_DURATION = 0.22
-        local SOUND_LEAD_IN = 0.1
-
-        for pos, idx in ipairs(fallOrder) do
+        for idx = 1, itemCount do
             local cell  = f.compactIcons[idx]
-            local cxOff = cell._fallX
-            local cyOff = cell._fallY
-            local startY = cyOff + FALL_HEIGHT
+            local delay = math.max((idx - 1) * 0.3, 0.016)
 
-            cell:ClearAllPoints()
-            cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, startY)
-            cell:SetAlpha(0)
-
-            local delay = math.max((pos - 1) * 0.3, 0.016)
-            cell.fallTimer = C_Timer.NewTicker(delay, function(self)
+            cell.wipeTimer = C_Timer.NewTicker(delay, function(self)
                 self:Cancel()
-                cell.fallTimer = nil
+                cell.wipeTimer = nil
                 if not cell:GetParent() then return end
-                cell:SetAlpha(1)
+
+                PlaySoundFile(Rustcore.GetAssetPath("Audio/rustedsound.wav"), "Master")
+
                 local t0 = GetTime()
-                local soundPlayed = false
-                cell.fallTicker = C_Timer.NewTicker(0.016, function(ticker)
+                cell.wipeTicker = C_Timer.NewTicker(0.016, function(ticker)
                     if not cell:GetParent() then ticker:Cancel(); return end
                     local elapsed = GetTime() - t0
-                    if not soundPlayed and elapsed >= FALL_DURATION - SOUND_LEAD_IN then
-                        soundPlayed = true
-                        PlaySoundFile(Rustcore.GetAssetPath("Audio/crash" .. math.random(1, 5) .. ".wav"), "Master")
-                    end
-                    if elapsed >= FALL_DURATION then
+                    if elapsed >= WIPE_DURATION then
                         ticker:Cancel()
-                        cell.fallTicker = nil
-                        cell:ClearAllPoints()
-                        cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, cyOff)
+                        cell.wipeTicker = nil
+                        if cell._rustedBorderTex then
+                            cell._rustedBorderTex:SetHeight(RUSTED_OVERLAY_SIZE)
+                            cell._rustedBorderTex:SetTexCoord(0, 1, 0, 1)
+                        end
                         return
                     end
-                    local t = elapsed / FALL_DURATION
-                    cell:ClearAllPoints()
-                    cell:SetPoint("TOPLEFT", f.rowContainer, "TOPLEFT", cxOff, startY + (cyOff - startY) * (t * t))
+                    local t = elapsed / WIPE_DURATION
+                    if cell._rustedBorderTex then
+                        cell._rustedBorderTex:SetHeight(RUSTED_OVERLAY_SIZE * t)
+                        cell._rustedBorderTex:SetTexCoord(0, 1, 0, t)
+                    end
                 end)
             end, 1)
+        end
+    else
+        for _, cell in ipairs(f.compactIcons) do
+            if cell._rustedBorderTex then
+                cell._rustedBorderTex:SetHeight(RUSTED_OVERLAY_SIZE)
+                cell._rustedBorderTex:SetTexCoord(0, 1, 0, 1)
+            end
         end
     end
 end
@@ -278,14 +295,13 @@ local function BuildRustedFrame()
     subLabel:SetJustifyH("CENTER")
     subLabel:SetWordWrap(true)
     subLabel:SetFont(BODY_FONT_PATH, 16, "")
-    subLabel:SetText("This item has rusted away and is no longer usable, do you wish to destroy it?")
+    subLabel:SetText("This item is no longer usable, do you want to delete it?")
     f.subLabel = subLabel
 
     local rowContainer = CreateFrame("Frame", nil, f)
     rowContainer:SetSize(ICON_SIZE, ICON_SIZE)
     f.rowContainer = rowContainer
 
-    -- Exit button — dismisses all shown items permanently
     local exitBtn = CreateFrame("Button", nil, f)
     exitBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -6)
     exitBtn:SetFrameLevel(f:GetFrameLevel() + 10)
@@ -299,7 +315,6 @@ local function BuildRustedFrame()
     end)
     RustcoreTheme.SkinExitButton(exitBtn)
 
-    -- Delete button
     local btn = CreateFrame("Button", "RustcoreRustedDeleteButton", f)
     btn:SetSize(200, 75)
     local btnLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -331,7 +346,6 @@ function RustcoreRusted.ExecuteDeletion()
         PlaySoundFile(Rustcore.GetAssetPath("Audio/Breaksound.flac"), "Master")
     end
 
-    -- Mark dismissed regardless of whether popup is confirmed — same as exit
     MarkDismissed(GetItemID(item.link))
     table.remove(pendingRustedItems, 1)
 
@@ -345,19 +359,15 @@ end
 
 -- ── Durability scan ───────────────────────────────────────────────────────────
 
-local function ScanBrokenItems()
-    if not RustcoreDB then return end
-    if not RustcoreDB.rustedDismissed then RustcoreDB.rustedDismissed = {} end
-
-    local newBroken = {}
+local function ScanAndQueue()
     for _, slot in ipairs(DURABLE_SLOTS) do
-        local link = GetInventoryItemLink("player", slot)
-        if link then
+        local link   = GetInventoryItemLink("player", slot)
+        local itemID = link and GetItemID(link)
+        if itemID then
             local current, max = GetInventoryItemDurability(slot)
             if current ~= nil and max and max > 0 and current == 0 then
-                local itemID = GetItemID(link)
-                if itemID and not IsDismissed(itemID) and not IsAlreadyPending(itemID) then
-                    newBroken[#newBroken + 1] = {
+                if not IsDismissed(itemID) and not IsAlreadyPending(itemID) then
+                    pendingRustedItems[#pendingRustedItems + 1] = {
                         link = link,
                         tex  = GetInventoryItemTexture("player", slot),
                     }
@@ -365,17 +375,15 @@ local function ScanBrokenItems()
             end
         end
     end
+end
 
-    if #newBroken == 0 then return end
+local function TryShowRustedFrame()
+    if #pendingRustedItems == 0 then return end
+    if UnitAffectingCombat("player") or InCombatLockdown() then return end
 
     local f = BuildRustedFrame()
     RustcoreTheme.SetDifficultyBackground(f, Rustcore.GetSetting("difficulty"))
-
     local playAnim = not f:IsShown()
-    for _, item in ipairs(newBroken) do
-        pendingRustedItems[#pendingRustedItems + 1] = item
-    end
-
     PopulateRustedIcons(pendingRustedItems, not playAnim)
     if playAnim then
         f:ClearAllPoints()
@@ -384,28 +392,28 @@ local function ScanBrokenItems()
     f:Show()
 end
 
+local function ScanBrokenItems()
+    ScanAndQueue()
+    TryShowRustedFrame()
+end
+
 -- ── Events ────────────────────────────────────────────────────────────────────
 
 local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("PLAYER_ALIVE")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
-    if event == "ADDON_LOADED" then
-        if arg1 == "GearCore" or arg1 == "Rustcore" then
-            if RustcoreDB and not RustcoreDB.rustedDismissed then
-                RustcoreDB.rustedDismissed = {}
-            end
-        end
-    elseif event == "PLAYER_ALIVE" then
-        -- spirit healer applies durability loss just before this fires;
-        -- defer one frame so the API values are settled
+    if event == "PLAYER_ALIVE" then
+        -- Spirit healer applies penalty at unpredictable time; scan twice to catch it
         C_Timer.After(0.5, ScanBrokenItems)
-    elseif event == "UPDATE_INVENTORY_DURABILITY"
-        or event == "PLAYER_REGEN_ENABLED"
-        or event == "PLAYER_DEAD" then
+        C_Timer.After(2.5, ScanBrokenItems)
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Combat ended — rescan in case items rusted during combat
+        ScanBrokenItems()
+    else
         ScanBrokenItems()
     end
 end)
