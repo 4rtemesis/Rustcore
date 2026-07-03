@@ -10,11 +10,16 @@ local BODY_FONT_PATH    -- resolved in Init
 -- Frame sizing
 local FRAME_W           = 110
 local FRAME_H           = 38
-local SLOT_GAP          = 3
+local SLOT_GAP          = -2
+
+-- Counter frame overlay art is 1890x558 (native); stretched to FRAME_W at full
+-- height it squashes the icon cutout into a tall rectangle, so the overlay is
+-- sized to this shorter height (and vertically centered) to keep the cutout square.
+local COUNTER_FRAME_H   = 32
 
 -- Counter digit layout — positions as fractions of FRAME_W, all relative to "LEFT"
 -- Counter area sits in the right portion of the counter overlay texture.
-local COUNTER_CENTER_X  = 0.675   -- center of counter area as fraction of FRAME_W
+local COUNTER_CENTER_X  = 0.62    -- center of counter area as fraction of FRAME_W
 local DIGIT_SPACING     = 0.148   -- distance between adjacent digit centers (fraction of FRAME_W)
 local DIGIT_SLOT_W      = 16      -- pixel width of each clipping digit slot
 local DIGIT_FONT_SIZE   = 13
@@ -24,7 +29,7 @@ local DIGIT_SLOT_H      = DIGIT_FONT_SIZE + 4
 
 -- Per-digit pixel nudge: { hundreds, tens, ones }
 -- Positive = right, negative = left.  Applied on top of the spacing formula.
-local DIGIT_NUDGE = { 0, 1, -2 }
+local DIGIT_NUDGE = { -5, -2, 1 }
 
 local COUNTER_ROLL_DURATION = 0.18  -- seconds per digit roll
 
@@ -36,24 +41,34 @@ local function Clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 -- Equipped slots with durability. Slot 15 (Back/Cloak) omitted — no durability.
 local SLOT_DATA = { 1, 3, 5, 6, 7, 8, 9, 10, 16, 17, 18 }
 
--- Icon layout constants
-local ICON_IMAGE_SIZE  = 28                       -- item icon image
-local ICON_BORDER_SIZE = 50                       -- UI-Quickslot2 border
-local RUSTED_SIZE      = 31                       -- rustedframe.tga overlay
+-- Icon layout constants (sized to fit the new counter frame's icon cutout, ~22px square)
+local ICON_IMAGE_SIZE  = 24                       -- item icon image
+local ICON_BORDER_SIZE = 40                       -- sizing basis for the rust overlay host
+local RUSTED_SIZE      = 27                       -- rustedframe.tga overlay
 local RUSTED_INSET     = (ICON_BORDER_SIZE - RUSTED_SIZE) / 2  -- inset from border edges
-local ICON_CENTER_X    = 22                       -- icon center from frame LEFT
-local ICON_Y_OFFSET    = -1                       -- icon elements shifted 1px down
-local RUSTED_X_OFFSET  = 0                        -- rust overlay x offset
+local ICON_CENTER_X    = 16                       -- icon center from frame LEFT
+local ICON_Y_OFFSET    = 0                        -- icon elements vertically centered
+local RUSTED_X_OFFSET  = -1                       -- rust overlay x offset
 local ICON_INSET       = 0.08                     -- texcoord crop (removes border artifact)
+
+-- Colors are blended toward gray by this much to soften the raw neon RGB mix below.
+local COLOR_SATURATION = 0.85
+
+local function Desaturate(r, g, b)
+    local gray = (r + g + b) / 3
+    return gray + (r - gray) * COLOR_SATURATION,
+           gray + (g - gray) * COLOR_SATURATION,
+           gray + (b - gray) * COLOR_SATURATION
+end
 
 -- Green (100%) → Yellow (50%) → Red (0%)
 local function GetDurabilityColor(current, maximum)
-    if maximum == 0 or current == 0 then return 1, 0, 0 end
+    if maximum == 0 or current == 0 then return Desaturate(1, 0, 0) end
     local pct = math.min(1, current / maximum)
     if pct >= 0.5 then
-        return 2 * (1 - pct), 1, 0
+        return Desaturate(2 * (1 - pct), 1, 0)
     else
-        return 1, 2 * pct, 0
+        return Desaturate(1, 2 * pct, 0)
     end
 end
 
@@ -123,8 +138,8 @@ local function SetCounterDigits(digits, value, r, g, b)
     local str = tostring(math.max(0, math.floor(value)))
     local len = #str
     local chars = {
-        len >= 3 and str:sub(-3, -3) or nil,   -- hundreds
-        len >= 2 and str:sub(-2, -2) or nil,   -- tens
+        len >= 3 and str:sub(-3, -3) or "0",   -- hundreds (always present, pads with 0)
+        len >= 2 and str:sub(-2, -2) or "0",   -- tens (always present, pads with 0)
         str:sub(-1),                            -- ones (always present)
     }
 
@@ -155,6 +170,8 @@ local function BuildDigitSlot(parent, idx)
                     + DIGIT_NUDGE[idx]
 
     local slot = CreateFrame("Frame", nil, parent)
+    -- Explicit level keeps digits above the counter frame overlay (set below).
+    slot:SetFrameLevel(parent:GetFrameLevel() + 5)
     -- Height = one digit character; SetClipsChildren keeps the roll inside this window.
     slot:SetSize(DIGIT_SLOT_W, DIGIT_SLOT_H)
     slot:SetPoint("CENTER", parent, "LEFT", centerX, 0)
@@ -208,15 +225,11 @@ local function BuildSlotFrame(parent, slotId)
     sepiaTex:SetDesaturation(1)
     sepiaTex:SetVertexColor(1.0, 0.5, 0.2, 0)   -- starts invisible
 
-    -- WoW quickslot border (sized like RustcoreRusted, extends slightly beyond icon)
-    local borderFrame = CreateFrame("Frame", nil, f)
-    borderFrame:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
-    borderFrame:SetPoint("CENTER", f, "LEFT", ICON_CENTER_X, ICON_Y_OFFSET)
-    borderFrame:SetFrameLevel(f:GetFrameLevel() + 2)
-    borderFrame:EnableMouse(false)
-    local borderTex = borderFrame:CreateTexture(nil, "OVERLAY")
-    borderTex:SetAllPoints(borderFrame)
-    borderTex:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    -- Slight shadow over the icon so it reads as sitting in the frame, not pasted on top
+    local shadowTex = f:CreateTexture(nil, "OVERLAY")
+    shadowTex:SetSize(ICON_IMAGE_SIZE, ICON_IMAGE_SIZE)
+    shadowTex:SetPoint("CENTER", f, "LEFT", ICON_CENTER_X, ICON_Y_OFFSET)
+    shadowTex:SetColorTexture(0, 0, 0, 0.20)
 
     -- Rusted frame overlay: wipes top-down from LOW_THRESHOLD to 0% durability
     local rustedHost = CreateFrame("Frame", nil, f)
@@ -231,10 +244,16 @@ local function BuildSlotFrame(parent, slotId)
     rustedTex:SetTexture(Rustcore.GetAssetPath("UI/rustedframe.tga"))
     rustedTex:SetTexCoord(0, 1, 0, 0)
 
-    -- Counter overlay (full frame width; counter graphic on right, icon area transparent)
-    local overlayTex = f:CreateTexture(nil, "OVERLAY")
-    overlayTex:SetAllPoints(f)
-    overlayTex:SetTexture(Rustcore.GetAssetPath("UI/Durability counter only.tga"))
+    -- Counter frame overlay: has a cutout window over the icon, so it must draw
+    -- above the icon/border/rust layers (not just above the icon's own textures).
+    local overlayHost = CreateFrame("Frame", nil, f)
+    overlayHost:SetSize(FRAME_W, COUNTER_FRAME_H)
+    overlayHost:SetPoint("CENTER", f, "CENTER", 0, 0)
+    overlayHost:SetFrameLevel(f:GetFrameLevel() + 4)
+    overlayHost:EnableMouse(false)
+    local overlayTex = overlayHost:CreateTexture(nil, "OVERLAY")
+    overlayTex:SetAllPoints(overlayHost)
+    overlayTex:SetTexture(Rustcore.GetAssetPath("UI/durability counter frame copy.tga"))
 
     -- Digit slots (child frames, draw above all textures automatically)
     local digits = {}
