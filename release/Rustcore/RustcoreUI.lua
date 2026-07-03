@@ -447,6 +447,9 @@ local function BuildFrame()
 
     local subLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     subLabel:SetPoint("TOP", title, "BOTTOM", 0, -10)
+    subLabel:SetWidth(240)
+    subLabel:SetJustifyH("CENTER")
+    subLabel:SetWordWrap(true)
     subLabel:SetText("")
     ApplyBodyFont(subLabel, 18)
     f.subLabel = subLabel
@@ -507,6 +510,10 @@ local function EnsureFrame()
     return deleteFrame
 end
 
+function RustcoreUI.GetDeleteFrame()
+    return deleteFrame
+end
+
 -- ── Spin UI population ────────────────────────────────────────────────────────
 
 ClearSpinRows = function()
@@ -550,7 +557,7 @@ PopulateSpinUI = function(items, skipAnim)
         local totalW = columns * ICON_SIZE + (columns - 1) * COMPACT_CELL_GAP
         local totalH = rowsInTallestColumn * ICON_SIZE + math.max(0, rowsInTallestColumn - 1) * COMPACT_CELL_GAP
         local frameW = math.max(totalW + 86, COMPACT_FRAME_MIN_WIDTH)
-        local frameH = math.max(totalH + 230, COMPACT_FRAME_MIN_HEIGHT)
+        local frameH = math.max(totalH + 250, COMPACT_FRAME_MIN_HEIGHT)
 
         f:SetSize(frameW, frameH)
         f:ClearAllPoints()
@@ -564,7 +571,7 @@ PopulateSpinUI = function(items, skipAnim)
         end
 
         f.rowContainer:ClearAllPoints()
-        f.rowContainer:SetPoint("TOP", f, "TOP", 0, -96)
+        f.rowContainer:SetPoint("TOP", f.subLabel or f, "BOTTOM", 0, -14)
         f.rowContainer:SetWidth(totalW)
         f.rowContainer:SetHeight(totalH)
 
@@ -792,18 +799,6 @@ end
 RefreshButtonState = function()
     local f = EnsureFrame()
 
-    if UnitIsDeadOrGhost("player") then
-        if f.statusMsg then
-            f.statusMsg:Hide()
-        end
-        if f.deleteBtn then
-            f.deleteBtn:SetText("")
-            f.deleteBtn:Disable()
-            f.deleteBtn:Show()
-        end
-        return
-    end
-
     if f.statusMsg then f.statusMsg:Hide() end
 
     if #pendingItems == 0 then
@@ -855,6 +850,11 @@ local function RestoreFrameVisualState()
     if not frameBottomAnchorX then
         frameBottomAnchorX = f:GetCenter()
         frameBottomAnchorY = f:GetBottom()
+    end
+
+    -- Arrange side-by-side with the rusted window if both are open at once
+    if RustcoreRusted and RustcoreRusted.LayoutFrames then
+        RustcoreRusted.LayoutFrames()
     end
 
     StartStatusUpdateTicker()
@@ -966,8 +966,10 @@ function RustcoreUI.ShowDeletionFrame(items, snapshotItems, skipAnim)
     end
     RustcoreTheme.SetDifficultyBackground(f, Rustcore.GetSetting("difficulty"))
     if f.subLabel then
-        local src = RustcoreDB and RustcoreDB.lastDeathSource
-        f.subLabel:SetText(src and ("Killed by: " .. src) or "")
+        local src = (RustcoreDB and RustcoreDB.lastDeathSource ~= "") and RustcoreDB.lastDeathSource or "Unknown"
+        local count = #pendingItems
+        local verb = count == 1 and "item was" or "items were"
+        f.subLabel:SetText(count .. " " .. verb .. " broken by " .. src .. ".")
     end
 
     PopulateSpinUI(pendingItems, skipAnim)
@@ -1283,10 +1285,6 @@ end
 
 function RustcoreUI.ExecuteDeletion()
     if processingTicker then return end
-    if UnitIsDeadOrGhost("player") then
-        print("|cffff4444Rustcore:|r You must resurrect before deleting queued items.")
-        return
-    end
 
     if #pendingItems == 0 then
         print("|cffff4444Rustcore:|r No pending items to process.")
@@ -1350,8 +1348,24 @@ function RustcoreUI.ExecuteDeletion()
         PickupInventoryItem(item.slot)
         if not CursorHasItem() then
             RestoreNow()
-            print("|cffff4444Rustcore:|r Could not pick up the equipped item. Try clicking again.")
-            RefreshButtonState()
+            local itemDisplay = item.link or item.name or "this item"
+            local deadMsg = UnitIsDeadOrGhost("player") and " Resurrect and try again for this item." or " Try clicking again."
+            print("|cffff4444Rustcore:|r Could not pick up " .. itemDisplay .. "." .. deadMsg)
+            if UnitIsDeadOrGhost("player") then
+                table.remove(pendingItems, 1)
+                table.insert(pendingItems, item)
+                SyncPendingDeletionDB()
+                if deleteFrame then
+                    frameBottomAnchorX = deleteFrame:GetCenter()
+                    frameBottomAnchorY = deleteFrame:GetBottom()
+                end
+                PopulateSpinUI(pendingItems, true)
+                local f = EnsureFrame()
+                f:Show()
+                StartStatusUpdateTicker()
+            else
+                RefreshButtonState()
+            end
             return
         end
         TriggerCursorDeletion(item)
@@ -1364,6 +1378,7 @@ function RustcoreUI.ExecuteDeletion()
         TriggerCursorDeletion(item)
         return
     end
+
     BeginArmMonitor()
     C_Timer.After(0.05, function()
         if pendingItems[1] ~= item then return end

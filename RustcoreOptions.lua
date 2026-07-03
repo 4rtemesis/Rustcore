@@ -121,6 +121,8 @@ local function RefreshCombatLockState(frame)
         frame.cbShowPopup,
         frame.cbShowWarning,
         frame.cbStats,
+        frame.cbDurHUD,
+        frame.cbDurShowAll,
     }
     for _, control in ipairs(controls) do
         if control then
@@ -148,7 +150,7 @@ end
 
 local function BuildOptionsFrame()
     local f = CreateFrame("Frame", "RustcoreOptionsFrame", UIParent, backdropTemplate)
-    f:SetSize(580, 584)
+    f:SetSize(580, 618)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -296,6 +298,16 @@ local function BuildOptionsFrame()
         "Show or hide the Rustcore item loss stats window.",
         cbMinimap, -8, "showStatsWindow")
 
+    local cbDurHUD = MakeCheckbox(f,
+        "Show Durability HUD",
+        "Replaces WoW's native durability frame with per-slot artwork. Only slots near 0 durability are shown by default. Reload UI to restore the original durability frame after disabling.",
+        cbStats, -8, "showDurabilityHUD")
+
+    local cbDurShowAll = MakeCheckbox(f,
+        "Always Show All Slots",
+        "Show durability for every equipped slot at all times, not just items with low durability.",
+        cbDurHUD, -8, "showAllDurability")
+
     -- ── Self-Found section ────────────────────────────────────────────────────
     local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     sfHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", rightColX - leftColX - 8, -26)
@@ -333,18 +345,6 @@ local function BuildOptionsFrame()
         "Display a center-screen raid warning when another Rustcore player dies.",
         cbShowPopup, -8, "showDeathWarning")
 
-    -- ── Death penalty recovery ────────────────────────────────────────────────
-    local queueBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    queueBtn:SetSize(230, 40)
-    queueBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 28)
-    queueBtn:SetScript("OnClick", function()
-        f:Hide()
-        RustcoreUI.ReopenDeletionFrame()
-    end)
-    RustcoreTheme.SkinButton(queueBtn)
-    ApplyBodyFont(queueBtn:GetFontString(), 17)
-    f.queueBtn = queueBtn
-
     -- Store refs for Refresh
     f.cbSelfFound   = cbSelfFound
     f.cbWeapon      = cbWeapon
@@ -356,6 +356,8 @@ local function BuildOptionsFrame()
     f.cbShowPopup   = cbShowPopup
     f.cbShowWarning = cbShowWarning
     f.cbStats       = cbStats
+    f.cbDurHUD      = cbDurHUD
+    f.cbDurShowAll  = cbDurShowAll
 
     f:SetScript("OnShow", function(self)
         local v = Rustcore.GetSetting("difficulty")
@@ -373,15 +375,8 @@ local function BuildOptionsFrame()
         self.cbShowPopup:Refresh()
         self.cbShowWarning:Refresh()
         self.cbStats:Refresh()
-
-        local count = RustcoreUI.GetPendingCount()
-        if count > 0 then
-            self.queueBtn:SetText("Show Pending Deletions")
-            self.queueBtn:Enable()
-        else
-            self.queueBtn:SetText("No Pending Deletions")
-            self.queueBtn:Disable()
-        end
+        self.cbDurHUD:Refresh()
+        self.cbDurShowAll:Refresh()
 
         RefreshCombatLockState(self)
     end)

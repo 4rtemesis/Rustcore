@@ -12,5 +12,7 @@ Rustcore.lua
 RustcoreBroadcast.lua
 RustcoreTheme.lua
 RustcoreStats.lua
+RustcoreDurability.lua
 RustcoreOptions.lua
 RustcoreUI.lua
+RustcoreRusted.lua

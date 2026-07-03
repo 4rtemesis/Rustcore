@@ -437,6 +437,9 @@ local function BuildFrame()
 
     local subLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     subLabel:SetPoint("TOP", title, "BOTTOM", 0, -10)
+    subLabel:SetWidth(240)
+    subLabel:SetJustifyH("CENTER")
+    subLabel:SetWordWrap(true)
     subLabel:SetText("")
     ApplyBodyFont(subLabel, 18)
     f.subLabel = subLabel
@@ -550,7 +553,7 @@ PopulateSpinUI = function(items, skipAnim)
         end
 
         f.rowContainer:ClearAllPoints()
-        f.rowContainer:SetPoint("TOP", f, "TOP", 0, -96)
+        f.rowContainer:SetPoint("TOP", f.subLabel or f, "BOTTOM", 0, -14)
         f.rowContainer:SetWidth(totalW)
         f.rowContainer:SetHeight(totalH)
 
@@ -869,8 +872,10 @@ function RustcoreUI.ShowDeletionFrame(items, snapshotItems)
     local f = EnsureFrame()
     RustcoreTheme.SetDifficultyBackground(f, Rustcore.GetSetting("difficulty"))
     if f.subLabel then
-        local src = RustcoreDB and RustcoreDB.lastDeathSource
-        f.subLabel:SetText(src and ("Killed by: " .. src) or "")
+        local src = (RustcoreDB and RustcoreDB.lastDeathSource ~= "") and RustcoreDB.lastDeathSource or "Unknown"
+        local count = #pendingItems
+        local verb = count == 1 and "item was" or "items were"
+        f.subLabel:SetText(count .. " " .. verb .. " broken by " .. src .. ".")
     end
 
     PopulateSpinUI(pendingItems)

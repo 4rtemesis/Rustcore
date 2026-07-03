@@ -97,7 +97,7 @@ end
 local function UpdateSubLabel(f, count)
     if not f or not f.subLabel then return end
     if count and count > 1 then
-        f.subLabel:SetText("These items are no longer usable, do you wish to delete them?")
+        f.subLabel:SetText("These items are no longer usable, do you want to delete them?")
     else
         f.subLabel:SetText("This item is no longer usable, do you want to delete it?")
     end
@@ -222,9 +222,16 @@ local function PopulateRustedIcons(items, skipAnim)
     if not skipAnim then
         local WIPE_DURATION = 0.5
 
-        for idx = 1, itemCount do
-            local cell  = f.compactIcons[idx]
-            local delay = math.max((idx - 1) * 0.3, 0.016)
+        local playOrder = {}
+        for i = 1, itemCount do playOrder[i] = i end
+        for i = itemCount, 2, -1 do
+            local j = math.random(i)
+            playOrder[i], playOrder[j] = playOrder[j], playOrder[i]
+        end
+
+        for rank = 1, itemCount do
+            local cell  = f.compactIcons[playOrder[rank]]
+            local delay = math.max((rank - 1) * 0.3, 0.016)
 
             cell.wipeTimer = C_Timer.NewTicker(delay, function(self)
                 self:Cancel()
@@ -335,6 +342,25 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
+function RustcoreRusted.GetRustedFrame()
+    return rustedFrame
+end
+
+local FRAME_GAP = 20
+
+local function LayoutBothFrames()
+    local df = RustcoreUI and RustcoreUI.GetDeleteFrame and RustcoreUI.GetDeleteFrame()
+    if not df or not df:IsShown() or not rustedFrame or not rustedFrame:IsShown() then return end
+    local dfW = df:GetWidth()
+    local rfW = rustedFrame:GetWidth()
+    df:ClearAllPoints()
+    df:SetPoint("CENTER", UIParent, "CENTER", -(rfW / 2 + FRAME_GAP / 2), 0)
+    rustedFrame:ClearAllPoints()
+    rustedFrame:SetPoint("CENTER", UIParent, "CENTER",  dfW / 2 + FRAME_GAP / 2, 0)
+end
+
+RustcoreRusted.LayoutFrames = LayoutBothFrames
+
 function RustcoreRusted.ExecuteDeletion()
     if #pendingRustedItems == 0 then return end
     local item = pendingRustedItems[1]
@@ -377,24 +403,32 @@ local function ScanAndQueue()
     end
 end
 
-local function TryShowRustedFrame()
+local function TryShowRustedFrame(hasNewItems)
     if #pendingRustedItems == 0 then return end
     if UnitAffectingCombat("player") or InCombatLockdown() then return end
 
     local f = BuildRustedFrame()
     RustcoreTheme.SetDifficultyBackground(f, Rustcore.GetSetting("difficulty"))
-    local playAnim = not f:IsShown()
-    PopulateRustedIcons(pendingRustedItems, not playAnim)
-    if playAnim then
+    local alreadyShown = f:IsShown()
+
+    -- If the frame is already visible and no new items were added, leave the
+    -- running wipe animation and sound alone — don't repopulate and cancel them.
+    if alreadyShown and not hasNewItems then return end
+
+    -- Play animation only when opening fresh; skip it if adding items to an open frame.
+    PopulateRustedIcons(pendingRustedItems, alreadyShown)
+    if not alreadyShown then
         f:ClearAllPoints()
         f:SetPoint("CENTER", UIParent, "CENTER", 60, 60)
     end
     f:Show()
+    LayoutBothFrames()
 end
 
 local function ScanBrokenItems()
+    local countBefore = #pendingRustedItems
     ScanAndQueue()
-    TryShowRustedFrame()
+    TryShowRustedFrame(#pendingRustedItems > countBefore)
 end
 
 -- ── Events ────────────────────────────────────────────────────────────────────

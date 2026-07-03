@@ -28,6 +28,8 @@ local defaults = {
     showDeathPopup  = true,  -- show popup notification for other players' deaths
     showDeathWarning= true, -- show center-screen warning for other players' deaths
     showStatsWindow = false, -- show the always-on-screen item loss stats window
+    showDurabilityHUD = true,    -- show custom per-slot durability HUD (replaces native frame)
+    showAllDurability = false,   -- show all equipped slots regardless of durability level
 }
 
 -- Gear slots tracked (shirt=4, tabard=19 excluded)
@@ -251,6 +253,8 @@ function Rustcore.SetSetting(key, value)
     elseif key == "difficulty" and RustcoreStats and RustcoreStats.RefreshStyle then
         RustcoreStats.RefreshStyle()
         RustcoreStats.RefreshLayout()
+    elseif (key == "showDurabilityHUD" or key == "showAllDurability") and RustcoreDurability and RustcoreDurability.Refresh then
+        RustcoreDurability.Refresh()
     end
     return true
 end
@@ -265,6 +269,11 @@ local function InitSettings()
     if RustcoreDB.blockRepair ~= nil and RustcoreDB.allowRepair == nil then
         RustcoreDB.allowRepair = not RustcoreDB.blockRepair
         RustcoreDB.blockRepair = nil
+    end
+    -- Migrate showDurabilityTooltip → showDurabilityHUD
+    if RustcoreDB.showDurabilityTooltip ~= nil and RustcoreDB.showDurabilityHUD == nil then
+        RustcoreDB.showDurabilityHUD = RustcoreDB.showDurabilityTooltip
+        RustcoreDB.showDurabilityTooltip = nil
     end
 end
 
@@ -293,15 +302,19 @@ local function TakeSnapshot()
         if slotId ~= skipSlot then
             local link = GetInventoryItemLink("player", slotId)
             if link then
-                local name, _, _, ilvl = GetItemInfo(link)
-                local tex = GetInventoryItemTexture("player", slotId) or GetItemIcon(link)
-                combatSnapshot[#combatSnapshot + 1] = {
-                    slot = slotId,
-                    link = link,
-                    name = name or ("Slot " .. slotId),
-                    tex = tex,
-                    ilvl = ilvl or 0,
-                }
+                local durCurrent, durMax = GetInventoryItemDurability(slotId)
+                local isBroken = durCurrent ~= nil and durMax ~= nil and durMax > 0 and durCurrent == 0
+                if not isBroken then
+                    local name, _, _, ilvl = GetItemInfo(link)
+                    local tex = GetInventoryItemTexture("player", slotId) or GetItemIcon(link)
+                    combatSnapshot[#combatSnapshot + 1] = {
+                        slot = slotId,
+                        link = link,
+                        name = name or ("Slot " .. slotId),
+                        tex = tex,
+                        ilvl = ilvl or 0,
+                    }
+                end
             end
         end
     end
@@ -670,6 +683,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if RustcoreStats and RustcoreStats.Init then
                 RustcoreStats.Init()
             end
+            if RustcoreDurability and RustcoreDurability.Init then
+                RustcoreDurability.Init()
+            end
             CreateMinimapButton()
             print("|cffff4444Rustcore|r loaded. |cffffd700/rustcore|r for options.")
 
@@ -678,14 +694,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
             if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
-                if UnitIsDeadOrGhost("player") then
-                    RustcoreUI.ShowDeletionFrame(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
-                else
-                    print("|cffff4444Rustcore:|r Pending death penalty detected — open the Rustcore window and click to process each item.")
-                    C_Timer.After(1, function()
-                        RustcoreUI.ShowDeletionFrame(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
-                    end)
-                end
+                C_Timer.After(1, function()
+                    RustcoreUI.ShowDeletionFrame(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot, true)
+                end)
             end
         end
 
@@ -713,7 +724,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         if not UnitIsDeadOrGhost("player") then
             if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
-                print("|cffff4444Rustcore:|r Resurrection detected — click the Rustcore button to process your pending deletions.")
                 C_Timer.After(1, function()
                     RustcoreUI.OnResurrect(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
                 end)
@@ -723,7 +733,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PLAYER_UNGHOST" then
         if UnitIsDeadOrGhost("player") then return end
         if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
-            print("|cffff4444Rustcore:|r Resurrection detected — click the Rustcore button to process your pending deletions.")
             C_Timer.After(1, function()
                 RustcoreUI.OnResurrect(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
             end)

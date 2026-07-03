@@ -1,0 +1,10 @@
+## Interface: 11508, 20505
+## Interface-Vanilla: 11508
+## Interface-TBC: 20505
+## Title: Rustcore Test
+## Notes: Developer test harness for Rustcore. /rctest to run.
+## Author: Rustcore
+## Version: 1.0
+## Dependencies: Rustcore
+
+Rustcore_Test.lua
