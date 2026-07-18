@@ -6,14 +6,42 @@ RustcoreDB = RustcoreDB or {}
 
 Rustcore = {}
 
+-- UnitFullName("player") only reliably returns a realm for cross-realm
+-- units; for the player's own character the realm return is often blank,
+-- so GetRealmName() is the source of truth for "what server am I on".
+local function GetPlayerRealmName()
+    local _, realm = UnitFullName and UnitFullName("player")
+    if realm and realm ~= "" then return realm end
+    return GetRealmName and GetRealmName() or nil
+end
+
 local function GetCurrentCharacterKey()
     local guid = UnitGUID and UnitGUID("player")
     if guid and guid ~= "" then return guid end
-    local name, realm = UnitFullName and UnitFullName("player")
+    local name = UnitName("player")
+    local realm = GetPlayerRealmName()
     if name and realm and realm ~= "" then
         return name .. "-" .. realm
     end
-    return UnitName("player")
+    return name
+end
+
+-- Per-character settings profile. Keyed by GetCurrentCharacterKey() so each
+-- character has independent settings; new characters start with an empty
+-- profile table and are seeded from `defaults` lazily via Rustcore.GetSetting.
+local function EnsureProfile()
+    RustcoreDB.profiles = RustcoreDB.profiles or {}
+    local key = GetCurrentCharacterKey()
+    RustcoreDB.profiles[key] = RustcoreDB.profiles[key] or {}
+    local profile = RustcoreDB.profiles[key]
+    local name = UnitName("player")
+    local realm = GetPlayerRealmName()
+    if name and realm and realm ~= "" then
+        profile.characterLabel = name .. "-" .. realm
+    elseif not profile.characterLabel then
+        profile.characterLabel = name or key
+    end
+    return profile
 end
 
 local defaults = {
@@ -30,6 +58,12 @@ local defaults = {
     showStatsWindow = false, -- show the always-on-screen item loss stats window
     showDurabilityHUD = true,    -- show custom per-slot durability HUD (replaces native frame)
     showAllDurability = false,   -- show all equipped slots regardless of durability level
+    durHUDGrowUpward = false,    -- stack durability HUD rows upward instead of downward
+    durHUDReverseOrder = false,  -- reverse stack sort so most-damaged item sits at the bottom
+    statsUseBlizzardFrame = false, -- use the default Blizzard UI frame instead of the corner rivets
+    statsBackgroundOpacity = 0.78, -- opacity of the stats window background art
+    statsBackgroundShadow = 0, -- opacity of the solid black plane behind the background art
+    statsHorizontalLayout = false, -- arrange all stats window elements on a single row
 }
 
 -- Gear slots tracked (shirt=4, tabard=19 excluded)
@@ -89,14 +123,43 @@ end
 -- ── Settings ──────────────────────────────────────────────────────────────────
 
 function Rustcore.GetSetting(key)
-    if RustcoreDB[key] == nil then
-        RustcoreDB[key] = defaults[key]
+    local profile = EnsureProfile()
+    if profile[key] == nil then
+        profile[key] = defaults[key]
     end
-    return RustcoreDB[key]
+    return profile[key]
+end
+
+-- Non-gameplay layout/placement values (window position, size, minimap angle).
+-- Still per-character, but not combat-locked and not seeded from `defaults` —
+-- dragging a window shouldn't silently fail to save just because you're in combat.
+function Rustcore.GetProfileValue(key)
+    return EnsureProfile()[key]
+end
+
+function Rustcore.SetProfileValue(key, value)
+    EnsureProfile()[key] = value
+end
+
+-- Keys of every gameplay/UI toggle setting (as opposed to the pure layout
+-- values handled by Get/SetProfileValue). Used by the options window's
+-- character-import feature to copy toggles and difficulty, not just placement.
+function Rustcore.GetDefaultSettingKeys()
+    local keys = {}
+    for k in pairs(defaults) do
+        keys[#keys + 1] = k
+    end
+    return keys
 end
 
 function Rustcore.SettingsLocked()
     return InCombatLockdown and InCombatLockdown()
+end
+
+function Rustcore.RefreshMinimapPosition()
+    if UpdateMinimapButtonPosition then
+        UpdateMinimapButtonPosition()
+    end
 end
 
 function Rustcore.GetCharacterKey()
@@ -234,7 +297,7 @@ function Rustcore.SetSetting(key, value)
         print("|cffff4444Rustcore:|r Settings cannot be changed while in combat.")
         return false
     end
-    RustcoreDB[key] = value
+    EnsureProfile()[key] = value
     if key == "selfFound" then
         if value then
             MarkSelfFoundEnabled()
@@ -253,18 +316,60 @@ function Rustcore.SetSetting(key, value)
     elseif key == "difficulty" and RustcoreStats and RustcoreStats.RefreshStyle then
         RustcoreStats.RefreshStyle()
         RustcoreStats.RefreshLayout()
+    elseif key == "statsUseBlizzardFrame" and RustcoreStats and RustcoreStats.RefreshFrameStyle then
+        RustcoreStats.RefreshFrameStyle()
+    elseif key == "statsBackgroundOpacity" and RustcoreStats and RustcoreStats.RefreshBackgroundOpacity then
+        RustcoreStats.RefreshBackgroundOpacity()
+    elseif key == "statsBackgroundShadow" and RustcoreStats and RustcoreStats.RefreshBackgroundShadow then
+        RustcoreStats.RefreshBackgroundShadow()
+    elseif key == "statsHorizontalLayout" and RustcoreStats then
+        if RustcoreStats.ApplyLayoutModeChange then
+            RustcoreStats.ApplyLayoutModeChange()
+        elseif RustcoreStats.RefreshLayout then
+            RustcoreStats.RefreshLayout()
+        end
+    elseif key == "durHUDGrowUpward" and RustcoreDurability then
+        if RustcoreDurability.HandleGrowUpwardChanged then
+            RustcoreDurability.HandleGrowUpwardChanged()
+        elseif RustcoreDurability.RefreshPosition then
+            RustcoreDurability.RefreshPosition()
+        end
     elseif (key == "showDurabilityHUD" or key == "showAllDurability") and RustcoreDurability and RustcoreDurability.Refresh then
         RustcoreDurability.Refresh()
+    elseif key == "durHUDReverseOrder" and RustcoreDurability and RustcoreDurability.HandleReverseOrderChanged then
+        RustcoreDurability.HandleReverseOrderChanged()
     end
     return true
 end
 
-local function InitSettings()
-    for k, v in pairs(defaults) do
-        if RustcoreDB[k] == nil then
-            RustcoreDB[k] = v
+-- Pre-profiles layout keys that used to live flat on RustcoreDB.
+local LEGACY_LAYOUT_KEYS = { "durHUDPos", "statsWindowPoint", "statsWindowSize", "minimapAngle" }
+
+-- One-time claim of the old account-wide flat settings by whichever character
+-- logs in first after this update. Every other/future character starts at
+-- `defaults`. Safe to call every login: no-ops once RustcoreDB.legacySettingsMigrated is set.
+local function MigrateLegacySettings()
+    RustcoreDB.profiles = RustcoreDB.profiles or {}
+    if RustcoreDB.legacySettingsMigrated then return end
+
+    local profile = EnsureProfile()
+    for k in pairs(defaults) do
+        if RustcoreDB[k] ~= nil then
+            profile[k] = RustcoreDB[k]
+            RustcoreDB[k] = nil
         end
     end
+    for _, k in ipairs(LEGACY_LAYOUT_KEYS) do
+        if RustcoreDB[k] ~= nil then
+            profile[k] = RustcoreDB[k]
+            RustcoreDB[k] = nil
+        end
+    end
+
+    RustcoreDB.legacySettingsMigrated = true
+end
+
+local function InitSettings()
     -- Migrate old blockRepair key to allowRepair
     if RustcoreDB.blockRepair ~= nil and RustcoreDB.allowRepair == nil then
         RustcoreDB.allowRepair = not RustcoreDB.blockRepair
@@ -275,6 +380,7 @@ local function InitSettings()
         RustcoreDB.showDurabilityHUD = RustcoreDB.showDurabilityTooltip
         RustcoreDB.showDurabilityTooltip = nil
     end
+    MigrateLegacySettings()
 end
 
 -- ── Weapon-slot detection ─────────────────────────────────────────────────────
@@ -512,7 +618,7 @@ end
 
 UpdateMinimapButtonPosition = function()
     if not minimapButton then return end
-    local angle = math.rad(RustcoreDB.minimapAngle or 220)
+    local angle = math.rad(Rustcore.GetProfileValue("minimapAngle") or 220)
     local x, y = math.cos(angle), math.sin(angle)
     local quadrant = 1
     if x < 0 then quadrant = quadrant + 1 end
@@ -636,7 +742,7 @@ local function CreateMinimapButton()
         self:LockHighlight()
         self.dragging = true
         self:SetScript("OnUpdate", function()
-            RustcoreDB.minimapAngle = GetMinimapAngleFromCursor()
+            Rustcore.SetProfileValue("minimapAngle", GetMinimapAngleFromCursor())
             UpdateMinimapButtonPosition()
         end)
     end)
@@ -644,7 +750,7 @@ local function CreateMinimapButton()
         self:UnlockHighlight()
         self.dragging = nil
         self:SetScript("OnUpdate", nil)
-        RustcoreDB.minimapAngle = GetMinimapAngleFromCursor()
+        Rustcore.SetProfileValue("minimapAngle", GetMinimapAngleFromCursor())
         UpdateMinimapButtonPosition()
     end)
 
@@ -689,11 +795,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             CreateMinimapButton()
             print("|cffff4444Rustcore|r loaded. |cffffd700/rustcore|r for options.")
 
-            if RustcoreDB.pendingDeletion and not PendingDeletionBelongsToCurrentCharacter() then
-                ClearPendingDeletionData()
-            end
-
-            if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
+            if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 and PendingDeletionBelongsToCurrentCharacter() then
                 C_Timer.After(1, function()
                     RustcoreUI.ShowDeletionFrame(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot, true)
                 end)
@@ -723,7 +825,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         tookEnemyPlayerDamageThisCombat = false
 
         if not UnitIsDeadOrGhost("player") then
-            if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
+            if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 and PendingDeletionBelongsToCurrentCharacter() then
                 C_Timer.After(1, function()
                     RustcoreUI.OnResurrect(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
                 end)
@@ -732,7 +834,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "PLAYER_UNGHOST" then
         if UnitIsDeadOrGhost("player") then return end
-        if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 then
+        if RustcoreDB.pendingDeletion and #RustcoreDB.pendingDeletion > 0 and PendingDeletionBelongsToCurrentCharacter() then
             C_Timer.After(1, function()
                 RustcoreUI.OnResurrect(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot)
             end)

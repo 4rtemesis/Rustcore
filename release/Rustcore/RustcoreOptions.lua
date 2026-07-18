@@ -20,6 +20,7 @@ local COMBAT_TITLE_TEXT = "Settings are locked\nwhile in combat"
 local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
 local TITLE_COLOR = { 0.85, 0.15, 0.15 }
+local PROFILE_SECTION_HEIGHT = 170
 
 local function ApplyBodyFont(fontString, size)
     if not fontString then return end
@@ -68,17 +69,17 @@ end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
-local function MakeCheckbox(parent, labelText, tooltipText, anchorTo, yOff, settingKey)
+local function MakeCheckbox(parent, labelText, tooltipText, anchorTo, yOff, settingKey, xOff, size, fontSize)
     local cb = CreateFrame("CheckButton", nil, parent)
-    cb:SetSize(26, 26)
-    cb:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, yOff)
+    cb:SetSize(size or 26, size or 26)
+    cb:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", xOff or 0, yOff)
 
     RustcoreTheme.SkinCheckbox(cb)
 
     local lbl = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
     lbl:SetText(labelText)
-    ApplyBodyFont(lbl, 17)
+    ApplyBodyFont(lbl, fontSize or 17)
 
     if tooltipText then
         cb:SetScript("OnEnter", function(self)
@@ -109,6 +110,10 @@ local function RefreshCombatLockState(frame)
         if locked then frame.diffSlider:Disable() else frame.diffSlider:Enable() end
         frame.diffSlider:SetAlpha(locked and 0.5 or 1)
     end
+    if frame.opacitySlider then
+        if locked then frame.opacitySlider:Disable() else frame.opacitySlider:Enable() end
+        frame.opacitySlider:SetAlpha(locked and 0.5 or 1)
+    end
 
     local controls = {
         frame.cbSelfFound,
@@ -121,14 +126,26 @@ local function RefreshCombatLockState(frame)
         frame.cbShowPopup,
         frame.cbShowWarning,
         frame.cbStats,
+        frame.cbStatsBlizzardFrame,
         frame.cbDurHUD,
         frame.cbDurShowAll,
+        frame.cbDurGrowUpward,
+        frame.cbDurReverseOrder,
+        frame.cbStatsHorizontal,
+        frame.importBtn,
     }
     for _, control in ipairs(controls) do
         if control then
             if locked then control:Disable() else control:Enable() end
             control:SetAlpha(locked and 0.5 or 1)
         end
+    end
+
+    if frame.importDropdown then
+        frame.importDropdown:SetAlpha(locked and 0.5 or 1)
+    end
+    if frame.importDropdownClick then
+        frame.importDropdownClick:EnableMouse(not locked)
     end
 
     if frame.combatNote then
@@ -150,8 +167,8 @@ end
 
 local function BuildOptionsFrame()
     local f = CreateFrame("Frame", "RustcoreOptionsFrame", UIParent, backdropTemplate)
-    f:SetSize(580, 618)
-    f:SetPoint("CENTER")
+    f:SetSize(630, 618 + PROFILE_SECTION_HEIGHT)
+    f:SetPoint("CENTER", 0, 55)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     RustcoreTheme.ApplyFrameSkin(f)
@@ -189,6 +206,10 @@ local function BuildOptionsFrame()
 
     local leftColX = 34
     local rightColX = 290
+
+    -- Assigned later, near the OnShow handler; referenced by the Character
+    -- Profile import button, which is built earlier in this function.
+    local RefreshAllControls
 
     -- ── Difficulty section ────────────────────────────────────────────────────
     local diffHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -293,20 +314,132 @@ local function BuildOptionsFrame()
         "Show or hide the Rustcore minimap button.",
         uiHeader, -8, "showMinimapButton")
 
-    local cbStats = MakeCheckbox(f,
-        "Show Stats Window",
-        "Show or hide the Rustcore item loss stats window.",
-        cbMinimap, -8, "showStatsWindow")
-
     local cbDurHUD = MakeCheckbox(f,
         "Show Durability HUD",
         "Replaces WoW's native durability frame with per-slot artwork. Only slots near 0 durability are shown by default. Reload UI to restore the original durability frame after disabling.",
-        cbStats, -8, "showDurabilityHUD")
+        cbMinimap, -8, "showDurabilityHUD")
 
     local cbDurShowAll = MakeCheckbox(f,
         "Always Show All Slots",
         "Show durability for every equipped slot at all times, not just items with low durability.",
-        cbDurHUD, -8, "showAllDurability")
+        cbDurHUD, -6, "showAllDurability", 34, 20, 14)
+
+    local cbDurGrowUpward = MakeCheckbox(f,
+        "Grow Upward",
+        "Makes the durability HUD grow upward from its anchor point instead of downward.",
+        cbDurShowAll, -6, "durHUDGrowUpward", 0, 20, 14)
+
+    local cbDurReverseOrder = MakeCheckbox(f,
+        "Reverse Order",
+        "Reverses the durability HUD stack order, placing the most damaged item at the bottom instead of the top.",
+        cbDurGrowUpward, -6, "durHUDReverseOrder", 0, 20, 14)
+
+    local cbStats = MakeCheckbox(f,
+        "Show Stats Window",
+        "Show or hide the Rustcore item loss stats window.",
+        cbDurReverseOrder, -12, "showStatsWindow", -34)
+
+    local cbStatsHorizontal = MakeCheckbox(f,
+        "Horizontal Display",
+        "Arranges all stats window elements in a single row instead of two.",
+        cbStats, -6, "statsHorizontalLayout", 34, 20, 14)
+
+    local cbStatsBlizzardFrame = MakeCheckbox(f,
+        "Use Default Blizzard Frame",
+        "Replaces the stats window's corner rivets with a standard Blizzard UI window border.",
+        cbStatsHorizontal, -6, "statsUseBlizzardFrame", 0, 20, 14)
+
+    local opacitySlider = CreateFrame("Slider", "RustcoreStatsOpacitySlider", f, "OptionsSliderTemplate")
+    opacitySlider:SetPoint("TOPLEFT", cbStatsBlizzardFrame, "BOTTOMLEFT", 4, -34)
+    opacitySlider:SetWidth(140)
+
+    local opacityLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    opacityLabel:SetPoint("BOTTOM", opacitySlider, "TOP", 0, 6)
+    opacityLabel:SetText("Background Opacity")
+    ApplyBodyFont(opacityLabel, 14)
+
+    opacitySlider:SetMinMaxValues(0, 1)
+    opacitySlider:SetValueStep(0.01)
+    local opacityTrack = RustcoreTheme.SkinSlider(opacitySlider, 140, -1)
+
+    local opacityLow  = _G[opacitySlider:GetName().."Low"]
+    local opacityHigh = _G[opacitySlider:GetName().."High"]
+    local opacityText = _G[opacitySlider:GetName().."Text"]
+    if opacityLow  then opacityLow:SetText("")  end
+    if opacityHigh then opacityHigh:SetText("") end
+    if opacityText then
+        opacityText:ClearAllPoints()
+        opacityText:SetPoint("TOP", opacityTrack, "BOTTOM", 0, -4)
+        ApplyBodyFont(opacityText, 14)
+    end
+
+    local function ApplyOpacityValue(slider, value)
+        local v = math.floor(math.max(0, math.min(1, value)) * 100 + 0.5) / 100
+        if math.abs((slider:GetValue() or v) - v) > 0.001 then
+            slider:SetValue(v)
+            return
+        end
+        if opacityText then opacityText:SetText(math.floor(v * 100 + 0.5) .. "%") end
+
+        if Rustcore.GetSetting("statsBackgroundOpacity") == v then return end
+        if not Rustcore.SetSetting("statsBackgroundOpacity", v) then
+            local current = Rustcore.GetSetting("statsBackgroundOpacity")
+            if math.abs((slider:GetValue() or current) - current) > 0.001 then
+                slider:SetValue(current)
+            end
+        end
+    end
+
+    opacitySlider:SetScript("OnValueChanged", function(self, value)
+        ApplyOpacityValue(self, value)
+    end)
+    opacitySlider:SetValue(Rustcore.GetSetting("statsBackgroundOpacity"))
+
+    local shadowSlider = CreateFrame("Slider", "RustcoreStatsShadowSlider", f, "OptionsSliderTemplate")
+    shadowSlider:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -48)
+    shadowSlider:SetWidth(140)
+
+    local shadowLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    shadowLabel:SetPoint("BOTTOM", shadowSlider, "TOP", 0, 6)
+    shadowLabel:SetText("Background Shadow")
+    ApplyBodyFont(shadowLabel, 14)
+
+    shadowSlider:SetMinMaxValues(0, 1)
+    shadowSlider:SetValueStep(0.01)
+    local shadowTrack = RustcoreTheme.SkinSlider(shadowSlider, 140, -1)
+
+    local shadowLow  = _G[shadowSlider:GetName().."Low"]
+    local shadowHigh = _G[shadowSlider:GetName().."High"]
+    local shadowText = _G[shadowSlider:GetName().."Text"]
+    if shadowLow  then shadowLow:SetText("")  end
+    if shadowHigh then shadowHigh:SetText("") end
+    if shadowText then
+        shadowText:ClearAllPoints()
+        shadowText:SetPoint("TOP", shadowTrack, "BOTTOM", 0, -4)
+        ApplyBodyFont(shadowText, 14)
+    end
+
+    local function ApplyShadowValue(slider, value)
+        local v = math.floor(math.max(0, math.min(1, value)) * 100 + 0.5) / 100
+        if math.abs((slider:GetValue() or v) - v) > 0.001 then
+            slider:SetValue(v)
+            return
+        end
+        if shadowText then shadowText:SetText(math.floor(v * 100 + 0.5) .. "%") end
+
+        if Rustcore.GetSetting("statsBackgroundShadow") == v then return end
+        if not Rustcore.SetSetting("statsBackgroundShadow", v) then
+            local current = Rustcore.GetSetting("statsBackgroundShadow")
+            if math.abs((slider:GetValue() or current) - current) > 0.001 then
+                slider:SetValue(current)
+            end
+        end
+    end
+
+    shadowSlider:SetScript("OnValueChanged", function(self, value)
+        ApplyShadowValue(self, value)
+    end)
+    shadowSlider:SetValue(Rustcore.GetSetting("statsBackgroundShadow"))
 
     -- ── Self-Found section ────────────────────────────────────────────────────
     local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -345,6 +478,169 @@ local function BuildOptionsFrame()
         "Display a center-screen raid warning when another Rustcore player dies.",
         cbShowPopup, -8, "showDeathWarning")
 
+    -- ── Character Profile ─────────────────────────────────────────────
+    local profileHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    profileHeader:SetPoint("TOPLEFT", cbShowWarning, "BOTTOMLEFT", 0, -20)
+    profileHeader:SetText("Character Profile")
+    ApplyBodyFont(profileHeader, 20)
+
+    local profileDesc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    profileDesc:SetPoint("TOPLEFT", profileHeader, "BOTTOMLEFT", 0, -6)
+    profileDesc:SetWidth(230)
+    profileDesc:SetJustifyH("LEFT")
+    profileDesc:SetText("Import settings from another character.")
+    ApplyBodyFont(profileDesc, 14)
+
+    -- Custom-skinned dropdown: all native UIDropDownMenuTemplate art
+    -- (side textures + arrow button) is hidden, replaced with the
+    -- "Lostitemframe Dark copy" texture sized/centered directly (not
+    -- inset from the template's own bounds, so it isn't constrained by
+    -- the template's built-in padding). A full-size invisible button
+    -- handles clicks anywhere on the art.
+    local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown", f, "UIDropDownMenuTemplate")
+    importDropdown:SetPoint("TOPLEFT", profileDesc, "BOTTOMLEFT", 0, -10)
+    UIDropDownMenu_SetWidth(importDropdown, 150)
+
+    local ddName = importDropdown:GetName()
+    local ddLeft, ddMiddle, ddRight, ddButton, ddText, ddIcon =
+        _G[ddName.."Left"], _G[ddName.."Middle"], _G[ddName.."Right"],
+        _G[ddName.."Button"], _G[ddName.."Text"], _G[ddName.."Icon"]
+    if ddLeft then ddLeft:Hide() end
+    if ddMiddle then ddMiddle:Hide() end
+    if ddRight then ddRight:Hide() end
+    if ddIcon then ddIcon:Hide() end
+    if ddButton then ddButton:Hide(); ddButton:EnableMouse(false) end
+
+    local ddBg = importDropdown:CreateTexture(nil, "BACKGROUND")
+    ddBg:SetTexture(Rustcore.GetAssetPath("UI/Lostitemframe Dark copy.tga"))
+    ddBg:SetSize(141, 24) -- ~20% larger than the original inset-derived size, +10% more to match text overflow
+    ddBg:SetPoint("TOPLEFT", importDropdown, "TOPLEFT", 0, 0)
+
+    local PLACEHOLDER_COLOR = { 0.6, 0.6, 0.6 }
+    local SELECTED_COLOR = { 1, 1, 1 }
+
+    if ddText then
+        ddText:ClearAllPoints()
+        ddText:SetJustifyH("LEFT")
+        ddText:SetPoint("LEFT", ddBg, "LEFT", 10, -1)
+        ApplyBodyFont(ddText, 14)
+    end
+
+    local ddClick = CreateFrame("Button", nil, importDropdown)
+    ddClick:SetAllPoints(ddBg)
+
+    local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    importBtn:SetSize(69, 18)
+    importBtn:SetPoint("TOPLEFT", ddBg, "BOTTOMLEFT", 0, -10)
+    importBtn:SetText("Import")
+    RustcoreTheme.SkinButton(importBtn)
+    ApplyBodyFont(importBtn:GetFontString(), 14)
+
+    local LAYOUT_IMPORT_KEYS = { "durHUDPos", "statsWindowPoint", "statsWindowSize", "minimapAngle" }
+    local selectedProfileKey = nil
+
+    local function RefreshImportDropdownText()
+        local profiles = RustcoreDB.profiles or {}
+        local currentKey = Rustcore.GetCharacterKey()
+        if selectedProfileKey and (selectedProfileKey == currentKey or not profiles[selectedProfileKey]) then
+            selectedProfileKey = nil
+        end
+        if selectedProfileKey and profiles[selectedProfileKey] then
+            UIDropDownMenu_SetText(importDropdown, profiles[selectedProfileKey].characterLabel or selectedProfileKey)
+            if ddText then ddText:SetTextColor(unpack(SELECTED_COLOR)) end
+        else
+            UIDropDownMenu_SetText(importDropdown, "Click to select")
+            if ddText then ddText:SetTextColor(unpack(PLACEHOLDER_COLOR)) end
+        end
+    end
+
+    ddClick:SetScript("OnClick", function()
+        if SettingsLocked() then return end
+        ToggleDropDownMenu(1, nil, importDropdown, importDropdown, 0, 0)
+    end)
+
+    -- Re-font the popout menu buttons to match BPpong and recenter the
+    -- list frame below our custom graphic whenever this dropdown's list
+    -- opens. Blizzard's ToggleDropDownMenu repositions and re-backdrops
+    -- the list frame AFTER calling Show() on it, so hooking OnShow was
+    -- too early (our changes got overwritten). Hooking the outer function
+    -- itself with hooksecurefunc runs after Blizzard's own logic finishes,
+    -- so our styling is the last thing applied and actually sticks.
+    local function ApplyDropdownListStyle(level, value, dropDownFrame)
+        if dropDownFrame ~= importDropdown then return end
+        if UIDROPDOWNMENU_OPEN_MENU ~= ddName then return end
+        level = level or 1
+        local listFrame = _G["DropDownList"..level]
+        if not (listFrame and listFrame:IsShown()) then return end
+        if level == 1 then
+            listFrame:ClearAllPoints()
+            listFrame:SetPoint("TOP", ddBg, "BOTTOM", -6, 2)
+            if listFrame.SetBackdrop then listFrame:SetBackdrop(nil) end
+            local listBackdrop = _G[listFrame:GetName().."Backdrop"]
+            if listBackdrop then
+                listBackdrop:Hide()
+                if listBackdrop.SetBackdrop then listBackdrop:SetBackdrop(nil) end
+            end
+        end
+        for i = 1, UIDROPDOWNMENU_MAXBUTTONS do
+            local btn = _G["DropDownList"..level.."Button"..i]
+            if not btn or not btn:IsShown() then break end
+            local btnText = _G[btn:GetName().."NormalText"]
+            if btnText then ApplyBodyFont(btnText, 14) end
+        end
+    end
+    hooksecurefunc("ToggleDropDownMenu", ApplyDropdownListStyle)
+
+    UIDropDownMenu_Initialize(importDropdown, function(self, level)
+        local profiles = RustcoreDB.profiles or {}
+        local currentKey = Rustcore.GetCharacterKey()
+        for key, profile in pairs(profiles) do
+            if key ~= currentKey then
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = profile.characterLabel or key
+                info.value = key
+                info.justificationH = "RIGHT"
+                info.func = function()
+                    selectedProfileKey = key
+                    RefreshImportDropdownText()
+                    CloseDropDownMenus()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
+        end
+    end)
+
+    importBtn:SetScript("OnClick", function()
+        if not selectedProfileKey then return end
+        if SettingsLocked() then
+            print("|cffff4444Rustcore:|r Settings cannot be changed while in combat.")
+            return
+        end
+        local profiles = RustcoreDB.profiles or {}
+        local source = profiles[selectedProfileKey]
+        if not source then return end
+
+        for _, key in ipairs(LAYOUT_IMPORT_KEYS) do
+            if source[key] ~= nil then
+                Rustcore.SetProfileValue(key, source[key])
+            end
+        end
+        for _, key in ipairs(Rustcore.GetDefaultSettingKeys()) do
+            if source[key] ~= nil then
+                Rustcore.SetSetting(key, source[key])
+            end
+        end
+
+        if RustcoreDurability and RustcoreDurability.RefreshPosition then RustcoreDurability.RefreshPosition() end
+        if RustcoreStats and RustcoreStats.RefreshPosition then RustcoreStats.RefreshPosition() end
+        if Rustcore.RefreshMinimapPosition then Rustcore.RefreshMinimapPosition() end
+        if RefreshAllControls then RefreshAllControls(f) end
+
+        PlaySoundFile(Rustcore.GetAssetPath("Audio/ticksound2.wav"), "Master")
+    end)
+
+    RefreshImportDropdownText()
+
     -- Store refs for Refresh
     f.cbSelfFound   = cbSelfFound
     f.cbWeapon      = cbWeapon
@@ -356,10 +652,19 @@ local function BuildOptionsFrame()
     f.cbShowPopup   = cbShowPopup
     f.cbShowWarning = cbShowWarning
     f.cbStats       = cbStats
+    f.cbStatsBlizzardFrame = cbStatsBlizzardFrame
+    f.opacitySlider = opacitySlider
     f.cbDurHUD      = cbDurHUD
     f.cbDurShowAll  = cbDurShowAll
+    f.cbDurGrowUpward = cbDurGrowUpward
+    f.cbDurReverseOrder = cbDurReverseOrder
+    f.cbStatsHorizontal = cbStatsHorizontal
+    f.importBtn     = importBtn
+    f.importDropdown = importDropdown
+    f.importDropdownClick = ddClick
+    f.RefreshImportDropdownText = RefreshImportDropdownText
 
-    f:SetScript("OnShow", function(self)
+    RefreshAllControls = function(self)
         local v = Rustcore.GetSetting("difficulty")
         RustcoreTheme.SetDifficultyBackground(self, v)
         self.diffSlider:SetValue(v)
@@ -375,9 +680,18 @@ local function BuildOptionsFrame()
         self.cbShowPopup:Refresh()
         self.cbShowWarning:Refresh()
         self.cbStats:Refresh()
+        self.cbStatsBlizzardFrame:Refresh()
+        self.opacitySlider:SetValue(Rustcore.GetSetting("statsBackgroundOpacity"))
         self.cbDurHUD:Refresh()
         self.cbDurShowAll:Refresh()
+        self.cbDurGrowUpward:Refresh()
+        self.cbDurReverseOrder:Refresh()
+        self.cbStatsHorizontal:Refresh()
+        self.RefreshImportDropdownText()
+    end
 
+    f:SetScript("OnShow", function(self)
+        RefreshAllControls(self)
         RefreshCombatLockState(self)
     end)
 

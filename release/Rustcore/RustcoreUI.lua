@@ -486,13 +486,12 @@ local function BuildFrame()
 
     -- Delete button (plain frame — no UIPanelButtonTemplate so its built-in textures don't bleed through)
     local btn = CreateFrame("Button", "RustcoreDeletionButton", f)
-    btn:SetSize(200, 75)
+    btn:SetSize(150, 56)
     local btnLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     btnLabel:SetPoint("CENTER", btn, "CENTER", 0, 0)
     btn:SetFontString(btnLabel)
     btn:SetScript("OnClick", RustcoreUI.ExecuteDeletion)
     RustcoreTheme.SkinDeleteButton(btn)
-    ApplyBodyFont(btn:GetFontString(), 18)
     f.deleteBtn = btn
     btn:Hide()
 
@@ -812,7 +811,7 @@ RefreshButtonState = function()
         return
     end
 
-    f.deleteBtn:SetText("")
+    f.deleteBtn:SetText("DELETE")
     f.deleteBtn:Enable()
     f.deleteBtn:Show()
 end

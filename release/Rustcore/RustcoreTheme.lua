@@ -158,14 +158,73 @@ function RustcoreTheme.SkinButton(button)
     EnsureButtonState(button)
 end
 
+local DELETE_BUTTON_FONT_SIZE = 22
+local DELETE_BUTTON_LETTER_SPACING = 4
+local DELETE_BUTTON_TEXT_COLOR = { 0.85, 0.85, 0.82 }
+local DELETE_BUTTON_TEXT_DISABLED_COLOR = { 0.5, 0.5, 0.48 }
+local DELETE_BUTTON_SHADOW_COLOR = { 0, 0, 0, 1 }
+
+local function EnsureDeleteButtonState(button)
+    local letters = button.rustcoreDeleteLetters
+    if not letters then return end
+    local color = button:IsEnabled() and DELETE_BUTTON_TEXT_COLOR or DELETE_BUTTON_TEXT_DISABLED_COLOR
+    for _, fs in ipairs(letters) do
+        fs:SetTextColor(color[1], color[2], color[3])
+    end
+end
+
+-- WoW font strings have no letter-tracking control, so the "DELETE" label is laid
+-- out as individually spaced font strings instead of relying on the button's
+-- built-in (hidden) text region.
+local function LayoutDeleteButtonLetters(button, text)
+    local letters = button.rustcoreDeleteLetters
+    if not letters then
+        letters = {}
+        button.rustcoreDeleteLetters = letters
+    end
+
+    text = text or ""
+    for i = #text + 1, #letters do
+        letters[i]:Hide()
+    end
+
+    local fontPath = Rustcore.GetAssetPath("Font/BPpong.otf")
+    local widths, totalWidth = {}, 0
+    for i = 1, #text do
+        local fs = letters[i]
+        if not fs then
+            fs = button:CreateFontString(nil, "OVERLAY")
+            letters[i] = fs
+        end
+        fs:SetFont(fontPath, DELETE_BUTTON_FONT_SIZE, "")
+        fs:SetShadowColor(DELETE_BUTTON_SHADOW_COLOR[1], DELETE_BUTTON_SHADOW_COLOR[2], DELETE_BUTTON_SHADOW_COLOR[3], DELETE_BUTTON_SHADOW_COLOR[4])
+        fs:SetShadowOffset(2, -2)
+        fs:SetText(text:sub(i, i))
+        fs:Show()
+        local w = fs:GetStringWidth()
+        widths[i] = w
+        totalWidth = totalWidth + w + (i < #text and DELETE_BUTTON_LETTER_SPACING or 0)
+    end
+
+    local x = -totalWidth / 2
+    for i = 1, #text do
+        local fs = letters[i]
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", button, "CENTER", x, BUTTON_TEXT_OFFSET_Y)
+        x = x + widths[i] + DELETE_BUTTON_LETTER_SPACING
+    end
+
+    EnsureDeleteButtonState(button)
+end
+
 function RustcoreTheme.SkinDeleteButton(button)
     if button.rustcoreDeleteBtnSkin then
-        EnsureButtonState(button)
+        EnsureDeleteButtonState(button)
         return
     end
 
-    button:SetNormalTexture(Asset("Deletebutton.tga"))
-    button:SetPushedTexture(Asset("Deletebuttonpressed.tga"))
+    button:SetNormalTexture(Asset("RedButton copy.tga"))
+    button:SetPushedTexture(Asset("RedButtonPressed copy.tga"))
     button:SetDisabledTexture(Asset("deletebuttonwait copy.tga"))
     button:SetPushedTextOffset(0, BUTTON_TEXT_OFFSET_Y)
 
@@ -181,17 +240,30 @@ function RustcoreTheme.SkinDeleteButton(button)
         disabled:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -10, 0)
     end
 
-    button:SetHighlightTexture(Asset("deletebuttonhighlight copy.tga"))
+    button:SetHighlightTexture(Asset("RedButtonHighlight copy.tga"))
     local hl = button:GetHighlightTexture()
     if hl then
         hl:SetAllPoints(button)
         hl:SetVertexColor(1, 1, 1, 0.55)
     end
 
-    button:HookScript("OnEnable", EnsureButtonState)
-    button:HookScript("OnDisable", EnsureButtonState)
+    local fontString = button:GetFontString()
+    if fontString then
+        fontString:SetAlpha(0)
+        LayoutDeleteButtonLetters(button, fontString:GetText())
+    end
+
+    if not button.rustcoreDeleteTextHooked then
+        button.SetText = function(self, text)
+            LayoutDeleteButtonLetters(self, text)
+        end
+        button.rustcoreDeleteTextHooked = true
+    end
+
+    button:HookScript("OnEnable", EnsureDeleteButtonState)
+    button:HookScript("OnDisable", EnsureDeleteButtonState)
     button.rustcoreDeleteBtnSkin = true
-    EnsureButtonState(button)
+    EnsureDeleteButtonState(button)
 end
 
 function RustcoreTheme.SkinExitButton(button)
@@ -316,13 +388,26 @@ function RustcoreTheme.SkinSlider(slider, width, trackYOffset)
 
     local sliderName = slider.GetName and slider:GetName()
     if sliderName then
-        for _, suffix in ipairs({ "Left", "Middle", "Right" }) do
+        for _, suffix in ipairs({ "Background", "Left", "Middle", "Right" }) do
             local region = _G[sliderName .. suffix]
-            if region then region:Hide() end
+            if region then region:SetTexture(nil) end
         end
     end
 
-    local track = slider:CreateTexture(nil, "BACKGROUND")
+    -- UISliderTemplate bakes its groove texture straight onto the slider's
+    -- BACKGROUND layer; SetTexture(nil) removes it outright so it can't be
+    -- re-shown by any later enable/disable state change.
+    local numRegions = select("#", slider:GetRegions())
+    for i = 1, numRegions do
+        local region = select(i, slider:GetRegions())
+        if region and region.GetObjectType and region:GetObjectType() == "Texture" then
+            region:SetTexture(nil)
+        end
+    end
+
+    -- Drawn in ARTWORK (above the template's BACKGROUND groove) so our track
+    -- fully covers the native texture even if it couldn't be stripped above.
+    local track = slider:CreateTexture(nil, "ARTWORK")
     track:SetPoint("CENTER", slider, "CENTER", 0, trackYOffset or -1)
     track:SetSize(width, 24)
     ApplyTexture(track, Asset("Rustcore-texture-slider-1 copy.tga"))

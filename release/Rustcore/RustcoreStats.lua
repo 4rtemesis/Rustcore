@@ -10,20 +10,27 @@ local GetSlotStateKey
 
 local GEAR_SLOTS = { 1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18 }
 local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
-local DEFAULT_WIDTH, DEFAULT_HEIGHT = 390, 170
+local DEFAULT_WIDTH, DEFAULT_HEIGHT = 350, 150
 local MIN_WIDTH, MIN_HEIGHT = 200, 125
+local MIN_HEIGHT_HORIZONTAL = 68
 local MAX_WIDTH, MAX_HEIGHT = 680, 300
 local BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT = 544, 548
 local BACKGROUND_ALPHA = 0.78
 local CORNER_SIZE = 14
 local TEXT_PAD = 10
+-- Horizontal layout packs graphics much closer to the window's left/right
+-- edges than the two-row layout does, so it gets its own, roomier side
+-- margin instead of sharing TEXT_PAD.
+local HORIZONTAL_SIDE_PAD = 20
 local BEST_ITEM_SIDE_PAD = 16
 local COLUMN_GAP = 4
 local ROW_GAP = 2
 local SELF_FOUND_CELL_RATIO = 0.60
-local COUNTER_REF_WIDTH, COUNTER_REF_HEIGHT = 416, 210
+local BEST_CELL_RATIO = 1.8
+local COUNTER_REF_WIDTH, COUNTER_REF_HEIGHT = 229, 103
 local COUNTER_DIGIT_SPACING = 0.235
-local COUNTER_MIDDLE_DIGIT_NUDGE = 1
+local COUNTER_LEFT_DIGIT_NUDGE = -3
+local COUNTER_MIDDLE_DIGIT_NUDGE = 0
 local COUNTER_RIGHT_DIGIT_OFFSET = 0.012
 local COUNTER_RIGHT_DIGIT_NUDGE = 1
 local COUNTER_DIGIT_Y = -0.01
@@ -32,9 +39,10 @@ local ITEM_FRAME_REF_WIDTH, ITEM_FRAME_REF_HEIGHT = 846, 190
 local ITEM_LINK_WIDTH_RATIO = 0.80
 local LABEL_COLOR = { 1, 0.82, 0 }
 local VALUE_COLOR = { 1, 1, 1 }
-local COUNTER_VALUE_COLOR = { 0.035, 0.03, 0.025 }
+local COUNTER_VALUE_COLOR = { 0.91, 0.88, 0.8 }
 local SELF_FOUND_TOOLTIP = "Verified Self Found Character"
 local RESIZE_TOOLTIP = "Left click and drag to adjust. Right click to auto adjust."
+local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 
 local function Clamp(value, minValue, maxValue)
     return math.max(minValue, math.min(maxValue, value))
@@ -151,17 +159,17 @@ end
 
 local function SavePosition(frame)
     local point, _, relativePoint, x, y = frame:GetPoint()
-    RustcoreDB.statsWindowPoint = {
+    Rustcore.SetProfileValue("statsWindowPoint", {
         point = point,
         relativePoint = relativePoint,
         x = x,
         y = y,
-    }
+    })
 end
 
 local function ApplySavedPosition(frame)
     frame:ClearAllPoints()
-    local pos = RustcoreDB.statsWindowPoint
+    local pos = Rustcore.GetProfileValue("statsWindowPoint")
     if pos and pos.point and pos.relativePoint and pos.x and pos.y then
         frame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
     else
@@ -171,19 +179,45 @@ end
 
 local function SaveSize(frame)
     local width, height = frame:GetSize()
-    RustcoreDB.statsWindowSize = {
+    Rustcore.SetProfileValue("statsWindowSize", {
         width = width,
         height = height,
-    }
+    })
+end
+
+-- The horizontal layout packs everything into one row of graphics, so it
+-- doesn't need the taller minimum the two-row layout requires to avoid
+-- clipping; letting it go shorter is what makes a wide-but-short bar possible.
+local function GetMinHeight()
+    return Rustcore.GetSetting("statsHorizontalLayout") and MIN_HEIGHT_HORIZONTAL or MIN_HEIGHT
+end
+
+local function ApplyResizeBounds()
+    if not statsFrame then return end
+    local minH = GetMinHeight()
+    if statsFrame.SetResizeBounds then
+        statsFrame:SetResizeBounds(MIN_WIDTH, minH, MAX_WIDTH, MAX_HEIGHT)
+    elseif statsFrame.SetMinResize and statsFrame.SetMaxResize then
+        statsFrame:SetMinResize(MIN_WIDTH, minH)
+        statsFrame:SetMaxResize(MAX_WIDTH, MAX_HEIGHT)
+    end
+    -- SetResizeBounds only constrains future drags; if the layout mode just
+    -- switched to one with a taller minimum, pull an already-too-short frame
+    -- back in bounds instead of leaving it stuck below the new floor.
+    local w, h = statsFrame:GetSize()
+    local clampedW, clampedH = Clamp(w, MIN_WIDTH, MAX_WIDTH), Clamp(h, minH, MAX_HEIGHT)
+    if clampedW ~= w or clampedH ~= h then
+        statsFrame:SetSize(clampedW, clampedH)
+    end
 end
 
 local function ApplySavedSize(frame)
-    local size = RustcoreDB.statsWindowSize
+    local size = Rustcore.GetProfileValue("statsWindowSize")
     local width = size and tonumber(size.width) or DEFAULT_WIDTH
     local height = size and tonumber(size.height) or DEFAULT_HEIGHT
     frame:SetSize(
         Clamp(width, MIN_WIDTH, MAX_WIDTH),
-        Clamp(height, MIN_HEIGHT, MAX_HEIGHT)
+        Clamp(height, GetMinHeight(), MAX_HEIGHT)
     )
 end
 
@@ -193,54 +227,107 @@ local function ApplyBodyFont(fontString, size)
     end
 end
 
+function RustcoreStats.RefreshPosition()
+    if not statsFrame then return end
+    ApplySavedPosition(statsFrame)
+    ApplySavedSize(statsFrame)
+    RustcoreStats.RefreshLayout()
+end
+
+-- Snaps the window height to whichever layout's natural size fits it best:
+-- short for the single-row horizontal layout, the original default for the
+-- taller two-row layout. Called whenever the horizontal toggle changes so
+-- the background isn't left oversized (or undersized) for the new layout.
+function RustcoreStats.ApplyLayoutModeChange()
+    if not statsFrame then return end
+    local horizontal = Rustcore.GetSetting("statsHorizontalLayout")
+    local targetHeight = horizontal and MIN_HEIGHT_HORIZONTAL or DEFAULT_HEIGHT
+    local _, currentHeight = statsFrame:GetSize()
+    if currentHeight ~= targetHeight then
+        statsFrame:SetHeight(targetHeight)
+        SaveSize(statsFrame)
+    end
+    RustcoreStats.RefreshLayout()
+end
+
 function RustcoreStats.RefreshLayout()
     if not statsFrame then return end
+    ApplyResizeBounds()
     local width, height = statsFrame:GetSize()
     local pad = TEXT_PAD
-    local contentWidth = math.max(1, width - (pad * 2))
+    local horizontal = Rustcore.GetSetting("statsHorizontalLayout")
+    local sidePad = horizontal and HORIZONTAL_SIDE_PAD or pad
+    local contentWidth = math.max(1, width - (sidePad * 2))
     local bestContentWidth = math.max(1, width - (BEST_ITEM_SIDE_PAD * 2))
     local contentHeight = math.max(1, height - (pad * 2))
-    local rowHeight = (contentHeight - ROW_GAP) / 2
+    local rowHeight = horizontal and contentHeight or ((contentHeight - ROW_GAP) / 2)
     local showRusted, showDestroyed = GetCounterVisibility()
     local showSelfFound = statsFrame.selfFoundIcon and statsFrame.selfFoundIcon:IsShown()
     local visibleCounterCount = (showRusted and 1 or 0) + (showDestroyed and 1 or 0)
+    local elementGap = 2
     local counterCellWidth
     local selfFoundCellWidth
-    if visibleCounterCount == 2 and showSelfFound then
-        counterCellWidth = (contentWidth - (COLUMN_GAP * 2)) / (2 + SELF_FOUND_CELL_RATIO)
-        selfFoundCellWidth = counterCellWidth * SELF_FOUND_CELL_RATIO
-    elseif visibleCounterCount == 2 then
-        counterCellWidth = (contentWidth - COLUMN_GAP) / 2
-        selfFoundCellWidth = 0
-    elseif visibleCounterCount == 1 then
-        counterCellWidth = showSelfFound
-            and math.min(
-                (contentWidth - COLUMN_GAP) / (1 + SELF_FOUND_CELL_RATIO),
-                rowHeight * 1.33
-            )
-            or contentWidth
-        selfFoundCellWidth = showSelfFound
-            and math.min(counterCellWidth * SELF_FOUND_CELL_RATIO, 72)
-            or 0
+    local bestCellWidth = bestContentWidth
+    local labelSize
+    local bestLabelSize
+    local graphicHeight
+    local horizontalRowWidth = 0
+    if horizontal then
+        -- Single row: every visible graphic (rusted/destroyed counters,
+        -- self-found icon, best-item frame) shares one graphicHeight so they
+        -- line up at the same height; only their widths differ, each scaled
+        -- from that shared height by its own aspect ratio.
+        labelSize = Clamp(math.floor(contentHeight * 0.16) + 1, 11, 16)
+        bestLabelSize = labelSize
+        local slotCount = visibleCounterCount + (showSelfFound and 1 or 0) + 1
+        local gaps = math.max(0, slotCount - 1) * COLUMN_GAP
+        local counterAspect = COUNTER_REF_WIDTH / COUNTER_REF_HEIGHT
+        local itemAspect = ITEM_FRAME_REF_WIDTH / ITEM_FRAME_REF_HEIGHT
+        local aspectSum = (visibleCounterCount * counterAspect) + (showSelfFound and 1 or 0) + itemAspect
+        local heightFromContent = math.max(1, contentHeight - labelSize - elementGap)
+        local heightFromWidth = (contentWidth - gaps) / math.max(aspectSum, 0.001)
+        graphicHeight = math.max(1, math.min(heightFromContent, heightFromWidth))
+
+        counterCellWidth = graphicHeight * counterAspect
+        selfFoundCellWidth = showSelfFound and graphicHeight or 0
+        bestCellWidth = graphicHeight * itemAspect
+        horizontalRowWidth = (visibleCounterCount * counterCellWidth) + selfFoundCellWidth + bestCellWidth + gaps
     else
-        counterCellWidth = contentWidth
-        selfFoundCellWidth = showSelfFound and math.min(contentWidth, 72) or 0
+        labelSize = Clamp(math.floor(rowHeight * 0.17) + 1, 12, 18)
+        bestLabelSize = Clamp(math.floor(rowHeight * 0.19), 11, 17)
+        if visibleCounterCount == 2 and showSelfFound then
+            counterCellWidth = (contentWidth - (COLUMN_GAP * 2)) / (2 + SELF_FOUND_CELL_RATIO)
+            selfFoundCellWidth = counterCellWidth * SELF_FOUND_CELL_RATIO
+        elseif visibleCounterCount == 2 then
+            counterCellWidth = (contentWidth - COLUMN_GAP) / 2
+            selfFoundCellWidth = 0
+        elseif visibleCounterCount == 1 then
+            counterCellWidth = showSelfFound
+                and math.min(
+                    (contentWidth - COLUMN_GAP) / (1 + SELF_FOUND_CELL_RATIO),
+                    rowHeight * 1.33
+                )
+                or contentWidth
+            selfFoundCellWidth = showSelfFound
+                and math.min(counterCellWidth * SELF_FOUND_CELL_RATIO, 72)
+                or 0
+        else
+            counterCellWidth = contentWidth
+            selfFoundCellWidth = showSelfFound and math.min(contentWidth, 72) or 0
+        end
     end
-    local labelSize = Clamp(math.floor(rowHeight * 0.17), 11, 17)
-    local counterWidth = math.min(counterCellWidth, rowHeight * 1.33)
+    local counterWidth = horizontal and counterCellWidth or math.min(counterCellWidth, rowHeight * 1.33)
     local counterHeight = counterWidth * (COUNTER_REF_HEIGHT / COUNTER_REF_WIDTH)
-    local elementGap = 2
     local counterTopOffset = labelSize + elementGap
     local digitSize = Clamp(math.floor(counterHeight * 0.34), 12, 25)
-    local bestLabelSize = Clamp(math.floor(rowHeight * 0.19), 11, 17)
-    local bestFrameMaxHeight = math.max(1, rowHeight - bestLabelSize - elementGap)
-    local bestFrameWidth = math.min(
-        bestContentWidth,
+    local bestFrameMaxHeight = horizontal and graphicHeight or math.max(1, rowHeight - bestLabelSize - elementGap)
+    local bestFrameWidth = horizontal and bestCellWidth or math.min(
+        bestCellWidth,
         bestFrameMaxHeight * (ITEM_FRAME_REF_WIDTH / ITEM_FRAME_REF_HEIGHT)
     )
     local bestFrameHeight = bestFrameWidth * (ITEM_FRAME_REF_HEIGHT / ITEM_FRAME_REF_WIDTH)
-    local bestValueSize = Clamp(math.floor(bestFrameHeight * 0.22) + 1, 11, 19)
-    local iconSize = Clamp(math.floor(math.min(
+    local bestValueSize = Clamp(math.floor(bestFrameHeight * 0.22) + 2, 12, 20)
+    local iconSize = horizontal and graphicHeight or Clamp(math.floor(math.min(
         selfFoundCellWidth,
         rowHeight - labelSize - elementGap,
         counterHeight
@@ -259,11 +346,27 @@ function RustcoreStats.RefreshLayout()
     end
 
     local topY = -pad
-    local bottomY = -pad - rowHeight - ROW_GAP
+    local bottomY = horizontal and topY or (-pad - rowHeight - ROW_GAP)
     local rustedCenterX
     local destroyedCenterX
     local selfFoundCenterX = width * 0.5
-    if visibleCounterCount == 2 then
+    local bestCenterX = width * 0.5
+    if horizontal then
+        -- Center the whole row within contentWidth instead of left-packing
+        -- it, so extra window width becomes empty margin rather than forcing
+        -- the graphics themselves to grow.
+        local cursor = sidePad + math.max(0, (contentWidth - horizontalRowWidth) * 0.5)
+        local function PlaceCell(w)
+            local centerX = cursor + (w * 0.5)
+            cursor = cursor + w + COLUMN_GAP
+            return centerX
+        end
+        -- Self-found icon goes last so it lands as the rightmost element.
+        if showRusted then rustedCenterX = PlaceCell(counterCellWidth) end
+        if showDestroyed then destroyedCenterX = PlaceCell(counterCellWidth) end
+        bestCenterX = PlaceCell(bestCellWidth)
+        if showSelfFound then selfFoundCenterX = PlaceCell(selfFoundCellWidth) end
+    elseif visibleCounterCount == 2 then
         rustedCenterX = pad + (counterCellWidth * 0.5)
         destroyedCenterX = pad + counterCellWidth + COLUMN_GAP + (counterCellWidth * 0.5)
         if showSelfFound then
@@ -305,7 +408,9 @@ function RustcoreStats.RefreshLayout()
         for i = 1, 3 do
             local slot = digits[i]
             local digitX = (i - 2) * counterWidth * COUNTER_DIGIT_SPACING
-            if i == 2 then
+            if i == 1 then
+                digitX = digitX + COUNTER_LEFT_DIGIT_NUDGE
+            elseif i == 2 then
                 digitX = digitX + COUNTER_MIDDLE_DIGIT_NUDGE
             elseif i == 3 then
                 digitX = digitX + (counterWidth * COUNTER_RIGHT_DIGIT_OFFSET) + COUNTER_RIGHT_DIGIT_NUDGE
@@ -343,8 +448,8 @@ function RustcoreStats.RefreshLayout()
     end
 
     statsFrame.bestLabel:ClearAllPoints()
-    statsFrame.bestLabel:SetPoint("TOP", statsFrame, "TOPLEFT", width * 0.5, bottomY)
-    statsFrame.bestLabel:SetWidth(bestContentWidth)
+    statsFrame.bestLabel:SetPoint("TOP", statsFrame, "TOPLEFT", bestCenterX, bottomY)
+    statsFrame.bestLabel:SetWidth(bestCellWidth)
 
     statsFrame.itemLostFrame:SetSize(bestFrameWidth, bestFrameHeight)
     statsFrame.itemLostFrame:ClearAllPoints()
@@ -364,6 +469,9 @@ function RustcoreStats.RefreshLayout()
     if statsFrame.background then
         statsFrame.background:SetTexCoord(0, 1, 0, 1)
         statsFrame.background:SetSize(backgroundWidth, backgroundHeight)
+    end
+    if statsFrame.backgroundShadow then
+        statsFrame.backgroundShadow:SetSize(backgroundWidth, backgroundHeight)
     end
     if statsFrame.backgroundClip then
         statsFrame.backgroundClip:SetSize(math.max(1, width), math.max(1, height))
@@ -393,6 +501,19 @@ local function GetAutoFitWidth()
         )
     end
 
+    local bestLabelWidth = statsFrame.bestLabel:GetStringWidth() or 0
+    local bestValueWidth = statsFrame.bestValue:GetStringWidth() or 0
+    local bottomWidth = math.max(140, bestLabelWidth, bestValueWidth / ITEM_LINK_WIDTH_RATIO)
+
+    if Rustcore.GetSetting("statsHorizontalLayout") then
+        local slotCount = visibleCounterCount + (showSelfFound and 1 or 0) + 1
+        local totalWidth = (counterCellWidth * visibleCounterCount)
+            + (showSelfFound and 44 or 0)
+            + bottomWidth
+            + (math.max(0, slotCount - 1) * COLUMN_GAP)
+        return Clamp(math.ceil(totalWidth + (HORIZONTAL_SIDE_PAD * 2)), MIN_WIDTH, MAX_WIDTH)
+    end
+
     local topWidth
     if visibleCounterCount == 2 and showSelfFound then
         topWidth = (counterCellWidth * (2 + SELF_FOUND_CELL_RATIO)) + (COLUMN_GAP * 2)
@@ -407,9 +528,6 @@ local function GetAutoFitWidth()
     else
         topWidth = 0
     end
-    local bestLabelWidth = statsFrame.bestLabel:GetStringWidth() or 0
-    local bestValueWidth = statsFrame.bestValue:GetStringWidth() or 0
-    local bottomWidth = math.max(140, bestLabelWidth, bestValueWidth / ITEM_LINK_WIDTH_RATIO)
     local requiredTopWidth = topWidth + (TEXT_PAD * 2)
     local requiredBottomWidth = bottomWidth + (BEST_ITEM_SIDE_PAD * 2)
     return Clamp(math.ceil(math.max(requiredTopWidth, requiredBottomWidth)), MIN_WIDTH, MAX_WIDTH)
@@ -430,9 +548,9 @@ local function BuildStatsFrame()
     f:EnableMouse(true)
     if f.SetClampedToScreen then f:SetClampedToScreen(true) end
     if f.SetResizeBounds then
-        f:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT, MAX_WIDTH, MAX_HEIGHT)
+        f:SetResizeBounds(MIN_WIDTH, GetMinHeight(), MAX_WIDTH, MAX_HEIGHT)
     elseif f.SetMinResize and f.SetMaxResize then
-        f:SetMinResize(MIN_WIDTH, MIN_HEIGHT)
+        f:SetMinResize(MIN_WIDTH, GetMinHeight())
         f:SetMaxResize(MAX_WIDTH, MAX_HEIGHT)
     end
 
@@ -445,24 +563,37 @@ local function BuildStatsFrame()
     bgChild:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
     bgClip:SetScrollChild(bgChild)
 
+    -- Solid black plane behind the background art itself (sublevel -1 is the
+    -- lowest possible draw layer, so nothing can end up in front of it by
+    -- accident). The background texture above it has its own independent
+    -- opacity slider, so this only becomes visible where that art is thin/
+    -- transparent or the background opacity is turned down.
+    local bgShadow = bgChild:CreateTexture(nil, "BACKGROUND", nil, -1)
+    bgShadow:SetPoint("TOPLEFT", bgChild, "TOPLEFT", 0, 0)
+    bgShadow:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
+    bgShadow:SetColorTexture(0, 0, 0, 1)
+    bgShadow:SetAlpha(Rustcore.GetSetting("statsBackgroundShadow") or 0)
+
     local bg = bgChild:CreateTexture(nil, "BACKGROUND")
     bg:SetPoint("TOPLEFT", bgChild, "TOPLEFT", 0, 0)
     bg:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
     bg:SetTexture(Rustcore.GetAssetPath("UI/background" .. Rustcore.GetSetting("difficulty") .. " copy.tga"))
-    bg:SetAlpha(BACKGROUND_ALPHA)
+    bg:SetAlpha(Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA)
 
     local shade = f:CreateTexture(nil, "ARTWORK")
     shade:SetAllPoints(f)
     shade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
-    shade:SetVertexColor(0, 0, 0, 0.10)
+    shade:SetVertexColor(0, 0, 0, 0.10 * (Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA))
 
+    local corners = {}
     local function CreateCorner(point, textureName, xOff, yOff)
         local corner = f:CreateTexture(nil, "ARTWORK")
         corner:SetTexture(Rustcore.GetAssetPath("UI/" .. textureName))
         corner:SetSize(CORNER_SIZE, CORNER_SIZE)
         corner:SetPoint(point, f, point, xOff, yOff)
         corner:SetTexCoord(0, 1, 0, 1)
-        corner:SetAlpha(BACKGROUND_ALPHA)
+        corner:SetAlpha(Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA)
+        table.insert(corners, corner)
         return corner
     end
 
@@ -470,6 +601,28 @@ local function BuildStatsFrame()
     CreateCorner("TOPRIGHT", "NutcornerUR.tga", -3, -3)
     CreateCorner("BOTTOMLEFT", "NutcornerUR.tga", 3, 3)
     CreateCorner("BOTTOMRIGHT", "NutcornerUL.tga", -3, 3)
+
+    -- Alternate to the corner-rivet look: a standard Blizzard dialog frame border.
+    -- Sized larger than the frame itself so the border art fully encloses the
+    -- background instead of the background bleeding past the drawn edge.
+    local blizzardBorder = CreateFrame("Frame", nil, f, backdropTemplate)
+    blizzardBorder:SetPoint("TOPLEFT", f, "TOPLEFT", -10, 11)
+    blizzardBorder:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 11, -10)
+    blizzardBorder:SetFrameLevel(f:GetFrameLevel() + 3)
+    blizzardBorder:EnableMouse(false)
+    if blizzardBorder.SetBackdrop then
+        blizzardBorder:SetBackdrop({
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true,
+            tileSize = 32,
+            edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
+        })
+    end
+    blizzardBorder:Hide()
+
+    f.corners = corners
+    f.blizzardBorder = blizzardBorder
 
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", function(self) self:StartMoving() end)
@@ -489,6 +642,7 @@ local function BuildStatsFrame()
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR", 0, -32)
         GameTooltip:AddLine("Rustcore Stats", 1, 1, 1)
         GameTooltip:AddLine("Right-click to open options", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Drag from lower right corner to change size", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function()
@@ -529,7 +683,7 @@ local function BuildStatsFrame()
     end
 
     local function CreateCounter()
-        local counter = CreateArtFrame("UI/Counter frame.tga")
+        local counter = CreateArtFrame("UI/DarkCounter copy.tga")
         local digits = {}
         for i = 1, 3 do
             local slot = CreateFrame("Frame", nil, counter)
@@ -554,7 +708,7 @@ local function BuildStatsFrame()
 
     local rustedCounter, rustedDigits = CreateCounter()
     local destroyedCounter, destroyedDigits = CreateCounter()
-    local itemLostFrame = CreateArtFrame("UI/Lostitemframe.tga")
+    local itemLostFrame = CreateArtFrame("UI/Lostitemframe Dark copy.tga")
     local bestValue = CreateStatsText(VALUE_COLOR, itemLostFrame)
 
     local bestHitbox = CreateFrame("Frame", nil, itemLostFrame)
@@ -574,7 +728,7 @@ local function BuildStatsFrame()
     selfFoundIcon:EnableMouse(true)
     selfFoundIcon.texture = selfFoundIcon:CreateTexture(nil, "ARTWORK")
     selfFoundIcon.texture:SetAllPoints(selfFoundIcon)
-    selfFoundIcon.texture:SetTexture(Rustcore.GetAssetPath("UI/Rustcore Selffound copy.tga"))
+    selfFoundIcon.texture:SetTexture(Rustcore.GetAssetPath("UI/Rustcore Selffound copy 2.tga"))
     selfFoundIcon.tooltipText = SELF_FOUND_TOOLTIP
     selfFoundIcon:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR", 0, -32)
@@ -678,9 +832,18 @@ local function BuildStatsFrame()
     f.backgroundClip = bgClip
     f.backgroundScrollChild = bgChild
     f.background = bg
+    f.backgroundShadow = bgShadow
+    f.shade = shade
     f.resizeGrip = resizeGrip
     ApplySavedPosition(f)
     RefreshText()
+
+    local useBlizzardFrame = Rustcore.GetSetting("statsUseBlizzardFrame")
+    for _, corner in ipairs(f.corners) do
+        corner:SetShown(not useBlizzardFrame)
+    end
+    f.blizzardBorder:SetShown(useBlizzardFrame)
+
     f:Hide()
     return f
 end
@@ -707,6 +870,36 @@ function RustcoreStats.RefreshStyle()
     if statsFrame and statsFrame.background then
         statsFrame.background:SetTexture(Rustcore.GetAssetPath("UI/background" .. Rustcore.GetSetting("difficulty") .. " copy.tga"))
     end
+end
+
+function RustcoreStats.RefreshFrameStyle()
+    if not statsFrame then return end
+    local useBlizzardFrame = Rustcore.GetSetting("statsUseBlizzardFrame")
+    for _, corner in ipairs(statsFrame.corners or {}) do
+        corner:SetShown(not useBlizzardFrame)
+    end
+    if statsFrame.blizzardBorder then
+        statsFrame.blizzardBorder:SetShown(useBlizzardFrame)
+    end
+end
+
+function RustcoreStats.RefreshBackgroundOpacity()
+    if not statsFrame then return end
+    local opacity = Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA
+    if statsFrame.background then
+        statsFrame.background:SetAlpha(opacity)
+    end
+    if statsFrame.shade then
+        statsFrame.shade:SetVertexColor(0, 0, 0, 0.10 * opacity)
+    end
+    for _, corner in ipairs(statsFrame.corners or {}) do
+        corner:SetAlpha(opacity)
+    end
+end
+
+function RustcoreStats.RefreshBackgroundShadow()
+    if not statsFrame or not statsFrame.backgroundShadow then return end
+    statsFrame.backgroundShadow:SetAlpha(Rustcore.GetSetting("statsBackgroundShadow") or 0)
 end
 
 function RustcoreStats.RefreshSelfFoundIcon()
