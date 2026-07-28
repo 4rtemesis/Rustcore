@@ -800,6 +800,10 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     RustcoreUI.ShowDeletionFrame(RustcoreDB.pendingDeletion, RustcoreDB.pendingDeletionSnapshot, true)
                 end)
             end
+
+            if RustcoreDifficultyPopup and RustcoreDifficultyPopup.MaybeShowOnLogin then
+                C_Timer.After(1, RustcoreDifficultyPopup.MaybeShowOnLogin)
+            end
         end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
@@ -951,4 +955,18 @@ SLASH_RUSTCORE1 = "/rustcore"
 SLASH_RUSTCORE2 = "/rc"
 SlashCmdList["RUSTCORE"] = function()
     RustcoreOptions.Toggle()
+end
+
+-- Manual trigger for the difficulty popup, since its auto-show-on-login
+-- call is disabled while we isolate a login crash (2026-07-28).
+SLASH_RCPOPUP1 = "/rcpopup"
+SlashCmdList["RCPOPUP"] = function()
+    if not (RustcoreDifficultyPopup and RustcoreDifficultyPopup.Show) then
+        print("|cffff4444Rustcore:|r difficulty popup is not loaded.")
+        return
+    end
+    local ok, err = pcall(RustcoreDifficultyPopup.Show)
+    if not ok then
+        print("|cffff4444Rustcore:|r difficulty popup error: " .. tostring(err))
+    end
 end

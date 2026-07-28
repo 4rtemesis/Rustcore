@@ -5,7 +5,7 @@ RustcoreOptions = {}
 
 local optFrame
 
-local DIFF_LABELS = { [1]="Lite", [2]="Normal", [3]="Hard", [4]="Brutal", [5]="Extreme" }
+local DIFF_LABELS = { [1]="Rusted", [2]="Broken", [3]="Shattered", [4]="Crumbling", [5]="Dust" }
 local DIFF_DESCS  = {
     [1] = "Only repair is blocked. No items are lost on death.",
     [2] = "Lose 1 random equipped item on death.",
@@ -231,13 +231,13 @@ local function BuildOptionsFrame()
     local sliderHigh = _G[slider:GetName().."High"]
     local sliderText = _G[slider:GetName().."Text"]
     if sliderLow then
-        sliderLow:SetText("Lite")
+        sliderLow:SetText("Rusted")
         sliderLow:ClearAllPoints()
         sliderLow:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 10, -6)
         ApplyBodyFont(sliderLow, 16)
     end
     if sliderHigh then
-        sliderHigh:SetText("Extreme")
+        sliderHigh:SetText("Dust")
         sliderHigh:ClearAllPoints()
         sliderHigh:SetPoint("TOPRIGHT", sliderTrack, "BOTTOMRIGHT", -10, -6)
         ApplyBodyFont(sliderHigh, 16)

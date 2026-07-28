@@ -12,5 +12,7 @@ RustcoreTheme.lua
 RustcoreStats.lua
 RustcoreDurability.lua
 RustcoreOptions.lua
+# Auto-show-on-login disabled in Rustcore.lua (2026-07-28); test with /rcpopup
+RustcoreDifficultyPopup.lua
 RustcoreUI.lua
 RustcoreRusted.lua

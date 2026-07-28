@@ -181,6 +181,10 @@ local activeOrder  = {} -- slot ids in current stack order (1 = nearest anchor);
                          -- stable across updates so existing icons don't
                          -- reshuffle as durability percentages change —
                          -- newly-visible slots are inserted by rank instead
+local lastLinkBySlot = {} -- slot id -> item link last seen there; lets a
+                           -- re-equip into an already-tracked slot be treated
+                           -- as a new insertion instead of keeping the old
+                           -- item's rank position
 
 -- Anchor corner used to pin the HUD container: a top-based corner keeps the
 -- top edge fixed and lets rows extend downward as they're added; a
@@ -651,7 +655,7 @@ local function UpdateHUD()
 
         entry.frame:SetShown(visible)
         if visible then
-            visibleSlots[#visibleSlots + 1] = { slot = slot, pct = pct }
+            visibleSlots[#visibleSlots + 1] = { slot = slot, pct = pct, link = link }
         end
     end
 
@@ -661,14 +665,20 @@ local function UpdateHUD()
     -- the other currently-placed slots (worst-first), so a freshly equipped
     -- item lands in the correct spot relative to everything already shown
     -- instead of only ever comparing against the current worst item.
-    local pctBySlot = {}
+    local pctBySlot  = {}
+    local linkBySlot = {}
     for _, entry in ipairs(visibleSlots) do
-        pctBySlot[entry.slot] = entry.pct
+        pctBySlot[entry.slot]  = entry.pct
+        linkBySlot[entry.slot] = entry.link
     end
 
+    -- A slot only keeps its old rank if the same item is still equipped
+    -- there; a re-equip (even into a slot that was already tracked) is
+    -- treated like a fresh insertion below so it re-ranks immediately
+    -- instead of just replacing the previous item's position.
     local newOrder = {}
     for _, slot in ipairs(activeOrder) do
-        if pctBySlot[slot] then
+        if pctBySlot[slot] and linkBySlot[slot] == lastLinkBySlot[slot] then
             newOrder[#newOrder + 1] = slot
         end
     end
@@ -698,6 +708,15 @@ local function UpdateHUD()
         end
     end
     activeOrder = newOrder
+
+    for slot in pairs(lastLinkBySlot) do
+        if not linkBySlot[slot] then
+            lastLinkBySlot[slot] = nil
+        end
+    end
+    for slot, link in pairs(linkBySlot) do
+        lastLinkBySlot[slot] = link
+    end
 
     if #activeOrder > 0 then
         local totalH = #activeOrder * FRAME_H + (#activeOrder - 1) * SLOT_GAP
