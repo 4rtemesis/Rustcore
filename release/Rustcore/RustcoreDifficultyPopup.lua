@@ -8,20 +8,23 @@ local f
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 local HEADER_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH   = Rustcore.GetAssetPath("Font/BPpong.otf")
-local BODY_COLOR = { 1, 0.82, 0 } -- same yellow as the options window's difficulty description text
+local BODY_COLOR = { 0.92, 0.89, 0.82 } -- off-white, used for the difficulty panel descriptions
+local WELCOME_TEXT_COLOR = { 1, 0.82, 0 } -- yellow, used for the intro description lines
+local INTRO_TITLE_COLOR = { 0.85, 0.15, 0.15 } -- same red as the options window title
 
-local FRAME_WIDTH, FRAME_HEIGHT = 560, 414
+local FRAME_WIDTH, FRAME_HEIGHT = 560, 415
 local PANEL_WIDTH = 150
 local PANEL_HEIGHT = 136
 local PANEL_GAP  = 16
 local PANEL_CORNER_SIZE = 14
-local HEADER_FONT_SIZE = 23
-local HEADER_LETTER_SPACING = 3
+local HEADER_FONT_SIZE = 25
+local HEADER_LETTER_SPACING = 0
 local HEADER_Y_OFFSET = 26
 local BODY_FONT_SIZE = 15
 local CORNER_COLOR_NORMAL   = { 0.55, 0.55, 0.55, 0.85 }
 local CORNER_COLOR_SELECTED = { 1, 1, 1, 1 }
 local UNSELECTED_BG_COLOR = { 0.55, 0.55, 0.55 }
+local SELECTED_BG_COLOR = { 0.9, 0.9, 0.9 } -- kept slightly dark rather than full white
 local DESATURATE_DIM = 0.55
 
 -- Grayscale-and-dim a color for the unselected-panel text state.
@@ -46,14 +49,14 @@ local PANEL_DATA = {
         value = 1,
         bg = "UI/background1 copy.tga",
         header = "RUSTED",
-        headerColor = { 0.41, 0.58, 0.20 },
+        headerColor = { 0.31, 0.49, 0.09 }, -- slightly more saturated, darker green
         body = "You can no longer repair items.",
     },
     {
         value = 2,
         bg = "UI/background2 copy.tga",
         header = "BROKEN",
-        headerColor = { 0.64, 0.50, 0.11 },
+        headerColor = { 0.68, 0.50, 0.02 }, -- slightly more saturated gold
         body = "Death will break one of your equipped items and you can no longer repair.",
     },
     {
@@ -81,13 +84,22 @@ local function BuildSpacedHeader(panel, text, color)
         shadowFs:SetFont(HEADER_FONT_PATH, HEADER_FONT_SIZE, "")
         shadowFs:SetTextColor(0, 0, 0, 0.75)
         shadowFs:SetText(text:sub(i, i))
+        shadowFs:Show()
         shadows[i] = shadowFs
 
         local fs = panel:CreateFontString(nil, "OVERLAY")
         fs:SetFont(HEADER_FONT_PATH, HEADER_FONT_SIZE, "")
         fs:SetTextColor(unpack(color))
         fs:SetText(text:sub(i, i))
+        fs:Show()
+        -- On a freshly built (never-yet-rendered) frame, GetStringWidth can
+        -- come back as 0 for a custom font that hasn't been measured before
+        -- this session, which collapses every letter to the same spot. Fall
+        -- back to an estimate so letters stay readable even then.
         local w = fs:GetStringWidth()
+        if not w or w <= 0 then
+            w = HEADER_FONT_SIZE * 0.55
+        end
         widths[i] = w
         letters[i] = fs
         totalWidth = totalWidth + w + (i < #text and HEADER_LETTER_SPACING or 0)
@@ -117,13 +129,18 @@ local function BuildSelectButtonText(button, text)
         sh:SetFont(SELECT_FONT_PATH, SELECT_FONT_SIZE, "")
         sh:SetTextColor(0, 0, 0, 1)
         sh:SetText(text:sub(i, i))
+        sh:Show()
         shadows[i] = sh
 
         local fs = button:CreateFontString(nil, "OVERLAY")
         fs:SetFont(SELECT_FONT_PATH, SELECT_FONT_SIZE, "")
         fs:SetTextColor(unpack(SELECT_TEXT_COLOR))
         fs:SetText(text:sub(i, i))
+        fs:Show()
         local w = fs:GetStringWidth()
+        if not w or w <= 0 then
+            w = SELECT_FONT_SIZE * 0.55
+        end
         widths[i] = w
         letters[i] = fs
         totalWidth = totalWidth + w + (i < #text and SELECT_LETTER_SPACING or 0)
@@ -166,6 +183,24 @@ local function SetCornersColor(corners, color)
     end
 end
 
+-- Recompute a panel's header/body text colors from its selected + hovering
+-- state. Hovering an unselected panel fully removes its desaturation, same
+-- as being selected.
+local function ApplyPanelTextColors(panel)
+    local headerColor, bodyColor
+    if panel.selected or panel.hovering then
+        headerColor = panel.headerColor
+        bodyColor = BODY_COLOR
+    else
+        headerColor = DesaturatedColor(panel.headerColor)
+        bodyColor = DesaturatedColor(BODY_COLOR)
+    end
+    for _, letter in ipairs(panel.headerLetters) do
+        letter:SetTextColor(unpack(headerColor))
+    end
+    panel.body:SetTextColor(unpack(bodyColor))
+end
+
 local function BuildPanel(parent, index, data)
     -- Cast-shadow plane, offset behind the panel. Sized to match the (inset)
     -- bg art and shifted further down-right than it, so the shadow only
@@ -193,9 +228,14 @@ local function BuildPanel(parent, index, data)
 
     -- Fake shadow (see BuildSpacedHeader note): black copy offset behind
     -- the real body text, since native shadowing doesn't render here.
+    -- Sized with a single anchor + explicit SetWidth (like diffDesc in
+    -- RustcoreOptions.lua) rather than a two-point TOPLEFT/BOTTOMRIGHT
+    -- anchor: on a freshly built, never-yet-rendered frame the dual-anchor
+    -- form was resolving to zero width, wrapping every word onto its own
+    -- line and rendering nothing at all.
     local bodyShadow = panel:CreateFontString(nil, "OVERLAY")
-    bodyShadow:SetPoint("TOPLEFT", panel, "TOPLEFT", 11, -HEADER_Y_OFFSET - 23)
-    bodyShadow:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -9, 7)
+    bodyShadow:SetPoint("TOP", panel, "TOP", 1, -HEADER_Y_OFFSET - 23)
+    bodyShadow:SetWidth(PANEL_WIDTH - 20)
     bodyShadow:SetFont(BODY_FONT_PATH, BODY_FONT_SIZE, "")
     bodyShadow:SetTextColor(0, 0, 0, 0.75)
     bodyShadow:SetJustifyH("CENTER")
@@ -204,8 +244,8 @@ local function BuildPanel(parent, index, data)
     bodyShadow:SetText(data.body)
 
     local body = panel:CreateFontString(nil, "OVERLAY")
-    body:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -HEADER_Y_OFFSET - 22)
-    body:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 8)
+    body:SetPoint("TOP", panel, "TOP", 0, -HEADER_Y_OFFSET - 22)
+    body:SetWidth(PANEL_WIDTH - 20)
     body:SetFont(BODY_FONT_PATH, BODY_FONT_SIZE, "")
     body:SetTextColor(unpack(BODY_COLOR))
     body:SetJustifyH("CENTER")
@@ -217,6 +257,15 @@ local function BuildPanel(parent, index, data)
     panel:SetScript("OnClick", function()
         PlaySoundFile(Rustcore.GetAssetPath("Audio/ticksound2.wav"), "Master")
         RustcoreDifficultyPopup.SetSelected(index)
+    end)
+
+    panel:SetScript("OnEnter", function()
+        panel.hovering = true
+        ApplyPanelTextColors(panel)
+    end)
+    panel:SetScript("OnLeave", function()
+        panel.hovering = false
+        ApplyPanelTextColors(panel)
     end)
 
     return panel
@@ -234,25 +283,49 @@ local function BuildFrame()
     -- window, so the popup stays on top even if options is opened over it.
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     RustcoreTheme.ApplyFrameSkin(frame)
 
     -- Darken the popup's background: a black plane behind the theme's
-    -- background art, both at 50% opacity, so the composite reads darker
-    -- than the shared theme default without touching other frames.
+    -- background art. The art itself stays near-opaque so the world behind
+    -- the popup doesn't show through; the plane only tints what little
+    -- bleeds through the art's remaining transparency, so the art on top
+    -- stays fully visible rather than getting covered/dimmed itself.
     local bgDarken = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
-    bgDarken:SetColorTexture(0, 0, 0, 0.5)
+    bgDarken:SetColorTexture(0, 0, 0, 0.95)
     bgDarken:SetAllPoints(frame.rustcoreThemeBackground)
-    frame.rustcoreThemeBackground:SetAlpha(0.5)
+    frame.rustcoreThemeBackground:SetAlpha(0.88)
 
-    local WELCOME_LINE1 = "Steel breaks. Armor fails. Death always takes its toll."
-    local WELCOME_LINE2 = "Choose the hardship you are willing to endure on your journey."
+    local WELCOME_LINE1 = "Your gear is temporary. Your scars are not."
+    local WELCOME_LINE2 = "Choose the hardship that will define your journey."
     local WELCOME_NOTE  = "(You can change these settings and find more customization in the options window.)"
 
     -- Fake shadow (see BuildSpacedHeader note): black copy offset behind
-    -- the real text, since native shadowing doesn't render here. Line 2
-    -- uses a smaller font than line 1 so the whole sentence fits on one line.
+    -- the real text, since native shadowing doesn't render here.
+    local titleShadow = frame:CreateFontString(nil, "OVERLAY")
+    titleShadow:SetPoint("TOP", frame, "TOP", 1, -33)
+    titleShadow:SetFont(HEADER_FONT_PATH, 30, "")
+    titleShadow:SetTextColor(0, 0, 0, 0.75)
+    titleShadow:SetJustifyH("CENTER")
+    titleShadow:SetWidth(FRAME_WIDTH - 40)
+    titleShadow:SetWordWrap(false)
+    titleShadow:SetText("RUSTCORE")
+
+    local title = frame:CreateFontString(nil, "OVERLAY")
+    title:SetPoint("TOP", frame, "TOP", 0, -32)
+    title:SetFont(HEADER_FONT_PATH, 30, "")
+    title:SetTextColor(unpack(INTRO_TITLE_COLOR))
+    title:SetJustifyH("CENTER")
+    title:SetWidth(FRAME_WIDTH - 40)
+    title:SetWordWrap(false)
+    title:SetText("RUSTCORE")
+
+    -- Line 2 uses a smaller font than line 1 so the whole sentence fits on one line.
     local line1Shadow = frame:CreateFontString(nil, "OVERLAY")
-    line1Shadow:SetPoint("TOP", frame, "TOP", 1, -49)
+    line1Shadow:SetPoint("TOP", title, "BOTTOM", 1, -13)
     line1Shadow:SetFont(BODY_FONT_PATH, 18, "")
     line1Shadow:SetTextColor(0, 0, 0, 0.75)
     line1Shadow:SetJustifyH("CENTER")
@@ -261,16 +334,16 @@ local function BuildFrame()
     line1Shadow:SetText(WELCOME_LINE1)
 
     local line1 = frame:CreateFontString(nil, "OVERLAY")
-    line1:SetPoint("TOP", frame, "TOP", 0, -48)
+    line1:SetPoint("TOP", title, "BOTTOM", 0, -12)
     line1:SetFont(BODY_FONT_PATH, 18, "")
-    line1:SetTextColor(1, 1, 1)
+    line1:SetTextColor(unpack(WELCOME_TEXT_COLOR))
     line1:SetJustifyH("CENTER")
     line1:SetWidth(FRAME_WIDTH - 40)
     line1:SetWordWrap(false)
     line1:SetText(WELCOME_LINE1)
 
     local line2Shadow = frame:CreateFontString(nil, "OVERLAY")
-    line2Shadow:SetPoint("TOP", line1, "BOTTOM", 1, -7)
+    line2Shadow:SetPoint("TOP", line1, "BOTTOM", 1, -4)
     line2Shadow:SetFont(BODY_FONT_PATH, 18, "")
     line2Shadow:SetTextColor(0, 0, 0, 0.75)
     line2Shadow:SetJustifyH("CENTER")
@@ -279,31 +352,13 @@ local function BuildFrame()
     line2Shadow:SetText(WELCOME_LINE2)
 
     local line2 = frame:CreateFontString(nil, "OVERLAY")
-    line2:SetPoint("TOP", line1, "BOTTOM", 0, -6)
+    line2:SetPoint("TOP", line1, "BOTTOM", 0, -3)
     line2:SetFont(BODY_FONT_PATH, 18, "")
-    line2:SetTextColor(1, 1, 1)
+    line2:SetTextColor(unpack(WELCOME_TEXT_COLOR))
     line2:SetJustifyH("CENTER")
     line2:SetWidth(FRAME_WIDTH - 40)
     line2:SetWordWrap(false)
     line2:SetText(WELCOME_LINE2)
-
-    local noteShadow = frame:CreateFontString(nil, "OVERLAY")
-    noteShadow:SetPoint("TOP", line2, "BOTTOM", 1, -9)
-    noteShadow:SetFont(BODY_FONT_PATH, 11, "")
-    noteShadow:SetTextColor(0, 0, 0, 0.75)
-    noteShadow:SetJustifyH("CENTER")
-    noteShadow:SetWidth(FRAME_WIDTH - 60)
-    noteShadow:SetWordWrap(true)
-    noteShadow:SetText(WELCOME_NOTE)
-
-    local note = frame:CreateFontString(nil, "OVERLAY")
-    note:SetPoint("TOP", line2, "BOTTOM", 0, -8)
-    note:SetFont(BODY_FONT_PATH, 11, "")
-    note:SetTextColor(0.6, 0.6, 0.6)
-    note:SetJustifyH("CENTER")
-    note:SetWidth(FRAME_WIDTH - 60)
-    note:SetWordWrap(true)
-    note:SetText(WELCOME_NOTE)
 
     local closeBtn = CreateFrame("Button", nil, frame)
     closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -6)
@@ -315,7 +370,7 @@ local function BuildFrame()
     RustcoreTheme.SkinExitButton(closeBtn)
 
     local panelRow = CreateFrame("Frame", nil, frame)
-    panelRow:SetPoint("TOP", note, "BOTTOM", 0, -20)
+    panelRow:SetPoint("TOP", line2, "BOTTOM", 0, -20)
     panelRow:SetSize(PANEL_WIDTH * 3 + PANEL_GAP * 2, PANEL_HEIGHT)
 
     frame.panels = {}
@@ -325,9 +380,27 @@ local function BuildFrame()
         frame.panels[i] = panel
     end
 
+    local noteShadow = frame:CreateFontString(nil, "OVERLAY")
+    noteShadow:SetPoint("TOP", panelRow, "BOTTOM", 1, -13)
+    noteShadow:SetFont(BODY_FONT_PATH, 11, "")
+    noteShadow:SetTextColor(0, 0, 0, 0.75)
+    noteShadow:SetJustifyH("CENTER")
+    noteShadow:SetWidth(FRAME_WIDTH - 60)
+    noteShadow:SetWordWrap(true)
+    noteShadow:SetText(WELCOME_NOTE)
+
+    local note = frame:CreateFontString(nil, "OVERLAY")
+    note:SetPoint("TOP", panelRow, "BOTTOM", 0, -12)
+    note:SetFont(BODY_FONT_PATH, 11, "")
+    note:SetTextColor(0.6, 0.6, 0.6)
+    note:SetJustifyH("CENTER")
+    note:SetWidth(FRAME_WIDTH - 60)
+    note:SetWordWrap(true)
+    note:SetText(WELCOME_NOTE)
+
     local selectBtn = CreateFrame("Button", "RustcoreDifficultySelectButton", frame)
     selectBtn:SetSize(150, 56)
-    selectBtn:SetPoint("TOP", panelRow, "BOTTOM", 0, -30)
+    selectBtn:SetPoint("TOP", note, "BOTTOM", 0, -18)
     RustcoreTheme.SkinDeleteButton(selectBtn)
     -- Built directly here (same font/size/spacing/shadow as the DELETE
     -- button's own LayoutDeleteButtonLetters) instead of going through
@@ -350,19 +423,14 @@ function RustcoreDifficultyPopup.SetSelected(index)
     f.selectedIndex = index
     for i, panel in ipairs(f.panels) do
         local selected = (i == index)
+        panel.selected = selected
         if selected then
-            panel.bg:SetVertexColor(1, 1, 1)
+            panel.bg:SetVertexColor(unpack(SELECTED_BG_COLOR))
         else
             panel.bg:SetVertexColor(unpack(UNSELECTED_BG_COLOR))
         end
         SetCornersColor(panel.corners, selected and CORNER_COLOR_SELECTED or CORNER_COLOR_NORMAL)
-
-        local headerColor = selected and panel.headerColor or DesaturatedColor(panel.headerColor)
-        for _, letter in ipairs(panel.headerLetters) do
-            letter:SetTextColor(unpack(headerColor))
-        end
-        local bodyColor = selected and BODY_COLOR or DesaturatedColor(BODY_COLOR)
-        panel.body:SetTextColor(unpack(bodyColor))
+        ApplyPanelTextColors(panel)
     end
 end
 
