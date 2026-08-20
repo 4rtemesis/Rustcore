@@ -16,6 +16,8 @@ mkdir -p "${stage_dir}"
 files=(
   "Rustcore.lua"
   "RustcoreBroadcast.lua"
+  "RustcoreSelfFoundBuff.lua"
+  "RustcoreSelfFoundComm.lua"
   "RustcoreTheme.lua"
   "RustcoreStats.lua"
   "RustcoreOptions.lua"

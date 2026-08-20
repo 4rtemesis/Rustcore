@@ -25,7 +25,6 @@ local HORIZONTAL_SIDE_PAD = 20
 local BEST_ITEM_SIDE_PAD = 16
 local COLUMN_GAP = 4
 local ROW_GAP = 2
-local SELF_FOUND_CELL_RATIO = 0.60
 local BEST_CELL_RATIO = 1.8
 local COUNTER_REF_WIDTH, COUNTER_REF_HEIGHT = 229, 103
 local COUNTER_DIGIT_SPACING = 0.235
@@ -40,7 +39,6 @@ local ITEM_LINK_WIDTH_RATIO = 0.80
 local LABEL_COLOR = { 1, 0.82, 0 }
 local VALUE_COLOR = { 1, 1, 1 }
 local COUNTER_VALUE_COLOR = { 0.91, 0.88, 0.8 }
-local SELF_FOUND_TOOLTIP = "Verified Self Found Character"
 local RESIZE_TOOLTIP = "Left click and drag to adjust. Right click to auto adjust."
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 
@@ -153,7 +151,6 @@ local function RefreshText()
     else
         statsFrame.bestHitbox:Hide()
     end
-    RustcoreStats.RefreshSelfFoundIcon()
     RustcoreStats.RefreshLayout()
 end
 
@@ -262,11 +259,9 @@ function RustcoreStats.RefreshLayout()
     local contentHeight = math.max(1, height - (pad * 2))
     local rowHeight = horizontal and contentHeight or ((contentHeight - ROW_GAP) / 2)
     local showRusted, showDestroyed = GetCounterVisibility()
-    local showSelfFound = statsFrame.selfFoundIcon and statsFrame.selfFoundIcon:IsShown()
     local visibleCounterCount = (showRusted and 1 or 0) + (showDestroyed and 1 or 0)
     local elementGap = 2
     local counterCellWidth
-    local selfFoundCellWidth
     local bestCellWidth = bestContentWidth
     local labelSize
     local bestLabelSize
@@ -274,46 +269,30 @@ function RustcoreStats.RefreshLayout()
     local horizontalRowWidth = 0
     if horizontal then
         -- Single row: every visible graphic (rusted/destroyed counters,
-        -- self-found icon, best-item frame) shares one graphicHeight so they
-        -- line up at the same height; only their widths differ, each scaled
-        -- from that shared height by its own aspect ratio.
+        -- best-item frame) shares one graphicHeight so they line up at the
+        -- same height; only their widths differ, each scaled from that
+        -- shared height by its own aspect ratio.
         labelSize = Clamp(math.floor(contentHeight * 0.16) + 1, 11, 16)
         bestLabelSize = labelSize
-        local slotCount = visibleCounterCount + (showSelfFound and 1 or 0) + 1
+        local slotCount = visibleCounterCount + 1
         local gaps = math.max(0, slotCount - 1) * COLUMN_GAP
         local counterAspect = COUNTER_REF_WIDTH / COUNTER_REF_HEIGHT
         local itemAspect = ITEM_FRAME_REF_WIDTH / ITEM_FRAME_REF_HEIGHT
-        local aspectSum = (visibleCounterCount * counterAspect) + (showSelfFound and 1 or 0) + itemAspect
+        local aspectSum = (visibleCounterCount * counterAspect) + itemAspect
         local heightFromContent = math.max(1, contentHeight - labelSize - elementGap)
         local heightFromWidth = (contentWidth - gaps) / math.max(aspectSum, 0.001)
         graphicHeight = math.max(1, math.min(heightFromContent, heightFromWidth))
 
         counterCellWidth = graphicHeight * counterAspect
-        selfFoundCellWidth = showSelfFound and graphicHeight or 0
         bestCellWidth = graphicHeight * itemAspect
-        horizontalRowWidth = (visibleCounterCount * counterCellWidth) + selfFoundCellWidth + bestCellWidth + gaps
+        horizontalRowWidth = (visibleCounterCount * counterCellWidth) + bestCellWidth + gaps
     else
         labelSize = Clamp(math.floor(rowHeight * 0.17) + 1, 12, 18)
         bestLabelSize = Clamp(math.floor(rowHeight * 0.19), 11, 17)
-        if visibleCounterCount == 2 and showSelfFound then
-            counterCellWidth = (contentWidth - (COLUMN_GAP * 2)) / (2 + SELF_FOUND_CELL_RATIO)
-            selfFoundCellWidth = counterCellWidth * SELF_FOUND_CELL_RATIO
-        elseif visibleCounterCount == 2 then
+        if visibleCounterCount == 2 then
             counterCellWidth = (contentWidth - COLUMN_GAP) / 2
-            selfFoundCellWidth = 0
-        elseif visibleCounterCount == 1 then
-            counterCellWidth = showSelfFound
-                and math.min(
-                    (contentWidth - COLUMN_GAP) / (1 + SELF_FOUND_CELL_RATIO),
-                    rowHeight * 1.33
-                )
-                or contentWidth
-            selfFoundCellWidth = showSelfFound
-                and math.min(counterCellWidth * SELF_FOUND_CELL_RATIO, 72)
-                or 0
         else
             counterCellWidth = contentWidth
-            selfFoundCellWidth = showSelfFound and math.min(contentWidth, 72) or 0
         end
     end
     local counterWidth = horizontal and counterCellWidth or math.min(counterCellWidth, rowHeight * 1.33)
@@ -327,15 +306,9 @@ function RustcoreStats.RefreshLayout()
     )
     local bestFrameHeight = bestFrameWidth * (ITEM_FRAME_REF_HEIGHT / ITEM_FRAME_REF_WIDTH)
     local bestValueSize = Clamp(math.floor(bestFrameHeight * 0.22) + 2, 12, 20)
-    local iconSize = horizontal and graphicHeight or Clamp(math.floor(math.min(
-        selfFoundCellWidth,
-        rowHeight - labelSize - elementGap,
-        counterHeight
-    )), 1, 72)
 
     ApplyBodyFont(statsFrame.destroyedLabel, labelSize)
     ApplyBodyFont(statsFrame.rustedLabel, labelSize)
-    ApplyBodyFont(statsFrame.selfFoundLabel, labelSize)
     ApplyBodyFont(statsFrame.bestLabel, bestLabelSize)
     ApplyBodyFont(statsFrame.bestValue, bestValueSize)
     for i = 1, 3 do
@@ -349,7 +322,6 @@ function RustcoreStats.RefreshLayout()
     local bottomY = horizontal and topY or (-pad - rowHeight - ROW_GAP)
     local rustedCenterX
     local destroyedCenterX
-    local selfFoundCenterX = width * 0.5
     local bestCenterX = width * 0.5
     if horizontal then
         -- Center the whole row within contentWidth instead of left-packing
@@ -361,31 +333,15 @@ function RustcoreStats.RefreshLayout()
             cursor = cursor + w + COLUMN_GAP
             return centerX
         end
-        -- Self-found icon goes last so it lands as the rightmost element.
         if showRusted then rustedCenterX = PlaceCell(counterCellWidth) end
         if showDestroyed then destroyedCenterX = PlaceCell(counterCellWidth) end
         bestCenterX = PlaceCell(bestCellWidth)
-        if showSelfFound then selfFoundCenterX = PlaceCell(selfFoundCellWidth) end
     elseif visibleCounterCount == 2 then
         rustedCenterX = pad + (counterCellWidth * 0.5)
         destroyedCenterX = pad + counterCellWidth + COLUMN_GAP + (counterCellWidth * 0.5)
-        if showSelfFound then
-            selfFoundCenterX = pad + (counterCellWidth * 2) + (COLUMN_GAP * 2) + (selfFoundCellWidth * 0.5)
-        end
     elseif visibleCounterCount == 1 then
-        local groupWidth = counterCellWidth
-        if showSelfFound then
-            groupWidth = groupWidth + COLUMN_GAP + selfFoundCellWidth
-        end
-        local groupLeft = (width - groupWidth) * 0.5
-        local counterCenterX = groupLeft + (counterCellWidth * 0.5)
-        rustedCenterX = counterCenterX
-        destroyedCenterX = counterCenterX
-        if showSelfFound then
-            selfFoundCenterX = groupLeft + counterCellWidth + COLUMN_GAP + (selfFoundCellWidth * 0.5)
-        end
-    elseif showSelfFound then
-        selfFoundCenterX = width * 0.5
+        rustedCenterX = width * 0.5
+        destroyedCenterX = width * 0.5
     end
 
     statsFrame.rustedLabel:ClearAllPoints()
@@ -436,17 +392,6 @@ function RustcoreStats.RefreshLayout()
         PositionCounter(statsFrame.destroyedCounter, statsFrame.destroyedDigits, destroyedCenterX)
     end
 
-    if statsFrame.selfFoundLabel then
-        statsFrame.selfFoundLabel:ClearAllPoints()
-        statsFrame.selfFoundLabel:SetPoint("TOP", statsFrame, "TOPLEFT", selfFoundCenterX, topY)
-        statsFrame.selfFoundLabel:SetWidth(selfFoundCellWidth)
-    end
-    if statsFrame.selfFoundIcon then
-        statsFrame.selfFoundIcon:SetSize(iconSize, iconSize)
-        statsFrame.selfFoundIcon:ClearAllPoints()
-        statsFrame.selfFoundIcon:SetPoint("TOP", statsFrame.selfFoundLabel, "BOTTOM", 0, -elementGap)
-    end
-
     statsFrame.bestLabel:ClearAllPoints()
     statsFrame.bestLabel:SetPoint("TOP", statsFrame, "TOPLEFT", bestCenterX, bottomY)
     statsFrame.bestLabel:SetWidth(bestCellWidth)
@@ -486,45 +431,30 @@ local function GetAutoFitWidth()
     RustcoreStats.RefreshLayout()
 
     local showRusted, showDestroyed = GetCounterVisibility()
-    local showSelfFound = statsFrame.selfFoundIcon and statsFrame.selfFoundIcon:IsShown()
     local visibleCounterCount = (showRusted and 1 or 0) + (showDestroyed and 1 or 0)
     local counterCellWidth = math.max(
         68,
         showRusted and (statsFrame.rustedLabel:GetStringWidth() or 0) or 0,
         showDestroyed and (statsFrame.destroyedLabel:GetStringWidth() or 0) or 0
     )
-    if showSelfFound and visibleCounterCount == 2 then
-        counterCellWidth = math.max(
-            counterCellWidth,
-            (statsFrame.selfFoundLabel:GetStringWidth() or 0) / SELF_FOUND_CELL_RATIO,
-            44 / SELF_FOUND_CELL_RATIO
-        )
-    end
 
     local bestLabelWidth = statsFrame.bestLabel:GetStringWidth() or 0
     local bestValueWidth = statsFrame.bestValue:GetStringWidth() or 0
     local bottomWidth = math.max(140, bestLabelWidth, bestValueWidth / ITEM_LINK_WIDTH_RATIO)
 
     if Rustcore.GetSetting("statsHorizontalLayout") then
-        local slotCount = visibleCounterCount + (showSelfFound and 1 or 0) + 1
+        local slotCount = visibleCounterCount + 1
         local totalWidth = (counterCellWidth * visibleCounterCount)
-            + (showSelfFound and 44 or 0)
             + bottomWidth
             + (math.max(0, slotCount - 1) * COLUMN_GAP)
         return Clamp(math.ceil(totalWidth + (HORIZONTAL_SIDE_PAD * 2)), MIN_WIDTH, MAX_WIDTH)
     end
 
     local topWidth
-    if visibleCounterCount == 2 and showSelfFound then
-        topWidth = (counterCellWidth * (2 + SELF_FOUND_CELL_RATIO)) + (COLUMN_GAP * 2)
-    elseif visibleCounterCount == 2 then
+    if visibleCounterCount == 2 then
         topWidth = (counterCellWidth * 2) + COLUMN_GAP
-    elseif visibleCounterCount == 1 and showSelfFound then
-        topWidth = counterCellWidth + COLUMN_GAP + 44
     elseif visibleCounterCount == 1 then
         topWidth = counterCellWidth
-    elseif showSelfFound then
-        topWidth = 44
     else
         topWidth = 0
     end
@@ -668,9 +598,6 @@ local function BuildStatsFrame()
 
     local destroyedLabel = CreateStatsText(LABEL_COLOR)
     local rustedLabel = CreateStatsText(LABEL_COLOR)
-    local selfFoundLabel = CreateStatsText(LABEL_COLOR)
-    selfFoundLabel:SetText("SF")
-    selfFoundLabel:Hide()
     local bestLabel = CreateStatsText(LABEL_COLOR)
 
     local function CreateArtFrame(texturePath)
@@ -723,22 +650,6 @@ local function BuildStatsFrame()
     bestHitbox:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-
-    local selfFoundIcon = CreateFrame("Frame", nil, textLayer)
-    selfFoundIcon:EnableMouse(true)
-    selfFoundIcon.texture = selfFoundIcon:CreateTexture(nil, "ARTWORK")
-    selfFoundIcon.texture:SetAllPoints(selfFoundIcon)
-    selfFoundIcon.texture:SetTexture(Rustcore.GetAssetPath("UI/Rustcore Selffound copy 2.tga"))
-    selfFoundIcon.tooltipText = SELF_FOUND_TOOLTIP
-    selfFoundIcon:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_CURSOR", 0, -32)
-        GameTooltip:SetText(self.tooltipText or SELF_FOUND_TOOLTIP, nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end)
-    selfFoundIcon:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-    selfFoundIcon:Hide()
 
     local resizeGrip = CreateFrame("Button", nil, f)
     resizeGrip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
@@ -823,12 +734,10 @@ local function BuildStatsFrame()
     f.destroyedDigits = destroyedDigits
     f.rustedCounter = rustedCounter
     f.rustedDigits = rustedDigits
-    f.selfFoundLabel = selfFoundLabel
     f.bestLabel = bestLabel
     f.bestValue = bestValue
     f.itemLostFrame = itemLostFrame
     f.bestHitbox = bestHitbox
-    f.selfFoundIcon = selfFoundIcon
     f.backgroundClip = bgClip
     f.backgroundScrollChild = bgChild
     f.background = bg
@@ -900,28 +809,6 @@ end
 function RustcoreStats.RefreshBackgroundShadow()
     if not statsFrame or not statsFrame.backgroundShadow then return end
     statsFrame.backgroundShadow:SetAlpha(Rustcore.GetSetting("statsBackgroundShadow") or 0)
-end
-
-function RustcoreStats.RefreshSelfFoundIcon()
-    if not statsFrame or not statsFrame.selfFoundIcon then return end
-    if not Rustcore.GetSelfFoundIconState then
-        statsFrame.selfFoundIcon:Hide()
-        statsFrame.selfFoundLabel:Hide()
-        RustcoreStats.RefreshLayout()
-        return
-    end
-
-    local state = Rustcore.GetSelfFoundIconState()
-    if state == "verified" then
-        statsFrame.selfFoundIcon.tooltipText = SELF_FOUND_TOOLTIP
-        statsFrame.selfFoundIcon.texture:SetVertexColor(1, 1, 1, 1)
-        statsFrame.selfFoundIcon:Show()
-        statsFrame.selfFoundLabel:Show()
-    else
-        statsFrame.selfFoundIcon:Hide()
-        statsFrame.selfFoundLabel:Hide()
-    end
-    RustcoreStats.RefreshLayout()
 end
 
 function RustcoreStats.RegisterDestroyedItem(item)

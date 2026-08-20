@@ -19,6 +19,12 @@ local function RefreshChannelNum()
     channelNum = (id and id > 0) and id or nil
 end
 
+-- Lets other Rustcore modules (e.g. RustcoreSelfFoundComm) reuse the same
+-- channel join instead of duplicating it.
+function RustcoreBroadcast.GetChannelNum()
+    return channelNum
+end
+
 local function JoinChannel()
     JoinChannelByName(CHANNEL_NAME, CHANNEL_PASS)
     C_Timer.After(3, RefreshChannelNum)

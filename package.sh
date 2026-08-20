@@ -16,6 +16,8 @@ files=(
   "Rustcore.toc"
   "Rustcore.lua"
   "RustcoreBroadcast.lua"
+  "RustcoreSelfFoundBuff.lua"
+  "RustcoreSelfFoundComm.lua"
   "RustcoreTheme.lua"
   "RustcoreStats.lua"
   "RustcoreOptions.lua"

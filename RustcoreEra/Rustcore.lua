@@ -139,9 +139,24 @@ function Rustcore.GetSelfFoundIconState()
     return "warning"
 end
 
+-- Spell 431567 "Self-Found Adventurer" is Blizzard's real Hardcore
+-- Self-Found buff. We show its actual icon (fetched live, not a bundled
+-- asset) so our own tracked self-found status reads as that real buff.
+local SELF_FOUND_SPELL_ID = 431567
+
+function Rustcore.GetSelfFoundIconTexture()
+    local tex
+    if C_Spell and C_Spell.GetSpellTexture then
+        tex = C_Spell.GetSpellTexture(SELF_FOUND_SPELL_ID)
+    elseif GetSpellTexture then
+        tex = GetSpellTexture(SELF_FOUND_SPELL_ID)
+    end
+    return tex or Rustcore.GetAssetPath("UI/Rustcore Selffound copy 2.tga")
+end
+
 local function RefreshSelfFoundStatsIcon()
-    if RustcoreStats and RustcoreStats.RefreshSelfFoundIcon then
-        RustcoreStats.RefreshSelfFoundIcon()
+    if RustcoreSelfFoundBuff and RustcoreSelfFoundBuff.Refresh then
+        RustcoreSelfFoundBuff.Refresh()
     end
 end
 

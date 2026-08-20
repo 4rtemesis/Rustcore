@@ -289,15 +289,14 @@ local function BuildFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     RustcoreTheme.ApplyFrameSkin(frame)
 
-    -- Darken the popup's background: a black plane behind the theme's
-    -- background art. The art itself stays near-opaque so the world behind
-    -- the popup doesn't show through; the plane only tints what little
-    -- bleeds through the art's remaining transparency, so the art on top
-    -- stays fully visible rather than getting covered/dimmed itself.
+    -- Darken the popup's background: a solid black plane behind the theme's
+    -- background art, with the art itself dropped to partial opacity so a
+    -- lot more of that black plane blends through and the whole window
+    -- reads noticeably darker.
     local bgDarken = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
-    bgDarken:SetColorTexture(0, 0, 0, 0.95)
+    bgDarken:SetColorTexture(0, 0, 0, 1)
     bgDarken:SetAllPoints(frame.rustcoreThemeBackground)
-    frame.rustcoreThemeBackground:SetAlpha(0.88)
+    frame.rustcoreThemeBackground:SetAlpha(0.45)
 
     local WELCOME_LINE1 = "Your gear is temporary. Your scars are not."
     local WELCOME_LINE2 = "Choose the hardship that will define your journey."

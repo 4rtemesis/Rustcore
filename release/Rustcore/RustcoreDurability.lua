@@ -63,6 +63,11 @@ local ICON_Y_OFFSET    = 0                        -- icon elements vertically ce
 local RUSTED_X_OFFSET  = -1                       -- rust overlay x offset
 local ICON_INSET       = 0.08                     -- texcoord crop (removes border artifact)
 
+-- Sepia tint multiplied over the fully-desaturated icon once an item enters
+-- the low-durability zone. Muted (channels closer together) rather than a
+-- vivid orange so the rusted-wipe overlay reads more clearly against it.
+local SEPIA_R, SEPIA_G, SEPIA_B = 0.62, 0.55, 0.48
+
 -- Colors are blended toward gray by this much to soften the raw neon RGB mix below.
 local COLOR_SATURATION = 0.85
 
@@ -185,6 +190,9 @@ local lastLinkBySlot = {} -- slot id -> item link last seen there; lets a
                            -- re-equip into an already-tracked slot be treated
                            -- as a new insertion instead of keeping the old
                            -- item's rank position
+local lastDurabilityBySlot = {} -- slot id -> durability last seen there for
+                                 -- the item currently in lastLinkBySlot; used
+                                 -- to detect the >0 -> 0 "just broke" edge
 
 -- Anchor corner used to pin the HUD container: a top-based corner keeps the
 -- top edge fixed and lets rows extend downward as they're added; a
@@ -495,7 +503,7 @@ local function BuildSlotFrame(parent, slotId)
     sepiaTex:SetPoint("CENTER", f, "LEFT", ICON_CENTER_X, ICON_Y_OFFSET)
     sepiaTex:SetTexCoord(ICON_INSET, 1 - ICON_INSET, ICON_INSET, 1 - ICON_INSET)
     sepiaTex:SetDesaturation(1)
-    sepiaTex:SetVertexColor(1.0, 0.5, 0.2, 0)   -- starts invisible
+    sepiaTex:SetVertexColor(SEPIA_R, SEPIA_G, SEPIA_B, 0)   -- starts invisible
 
     -- Slight shadow over the icon so it reads as sitting in the frame, not pasted on top
     local shadowTex = f:CreateTexture(nil, "OVERLAY")
@@ -593,6 +601,41 @@ local function BuildHUD()
     end
 end
 
+-- ── Break reaction (shake + crash sound) ────────────────────────────────────────
+
+-- Small decaying shake played on the item's HUD row when it breaks. Offsets
+-- sum to zero so the row settles back exactly on its anchored position
+-- (Translation animations offset visually without touching the frame's own
+-- SetPoint anchor, so this coexists fine with the stack-reflow logic below).
+local function PlayBreakShake(frame)
+    if not frame.breakShakeAnim then
+        local ag = frame:CreateAnimationGroup()
+        local function Step(order, dx, duration)
+            local t = ag:CreateAnimation("Translation")
+            t:SetOrder(order)
+            t:SetDuration(duration)
+            t:SetOffset(dx, 0)
+        end
+        Step(1, -4, 0.035)
+        Step(2, 8, 0.05)
+        Step(3, -7, 0.05)
+        Step(4, 5, 0.045)
+        Step(5, -2, 0.04)
+        frame.breakShakeAnim = ag
+    end
+    frame.breakShakeAnim:Stop()
+    frame.breakShakeAnim:Play()
+end
+
+-- Item just went from >0 durability to 0. Shake its HUD row always; only
+-- play a crash sound if the break happened mid-combat.
+local function HandleItemBroke(frame)
+    PlayBreakShake(frame)
+    if InCombatLockdown() then
+        PlaySoundFile(Rustcore.GetAssetPath("Audio/crash" .. math.random(1, 5) .. ".wav"), "Master")
+    end
+end
+
 -- ── HUD update ────────────────────────────────────────────────────────────────
 
 local function UpdateHUD()
@@ -627,13 +670,22 @@ local function UpdateHUD()
                     -- Sepia snaps fully desaturated the instant the item enters the
                     -- low-durability zone; rust is what ramps from there to 0.
                     local sepiaAlpha = (pct <= threshold) and 1.0 or 0.0
-                    entry.frame.sepiaTex:SetVertexColor(1.0, 0.5, 0.2, sepiaAlpha)
+                    entry.frame.sepiaTex:SetVertexColor(SEPIA_R, SEPIA_G, SEPIA_B, sepiaAlpha)
 
                     -- Rusted wipe: 0 coverage at the threshold → full at 0%
                     local rustedFrac = Clamp(
                         (threshold - pct) / threshold, 0, 1)
                     entry.frame.rustedTex:SetHeight(RUSTED_SIZE * rustedFrac)
                     entry.frame.rustedTex:SetTexCoord(0, 1, 0, rustedFrac)
+
+                    -- "Just broke" edge: only fires when we previously saw this
+                    -- same item above 0 durability, not on login/re-equip with
+                    -- an already-broken item.
+                    local prevDurability = (link == lastLinkBySlot[slot]) and lastDurabilityBySlot[slot] or nil
+                    if current == 0 and prevDurability and prevDurability > 0 then
+                        HandleItemBroke(entry.frame)
+                    end
+                    lastDurabilityBySlot[slot] = current
 
                     local r, g, b = GetDurabilityColor(current, maximum)
                     SetCounterDigits(entry.frame.digits, current, r, g, b)
@@ -648,7 +700,7 @@ local function UpdateHUD()
                 d:SetScript("OnUpdate", nil)
                 d.currentValue = nil
             end
-            entry.frame.sepiaTex:SetVertexColor(1.0, 0.5, 0.2, 0)
+            entry.frame.sepiaTex:SetVertexColor(SEPIA_R, SEPIA_G, SEPIA_B, 0)
             entry.frame.rustedTex:SetHeight(0)
             entry.frame.rustedTex:SetTexCoord(0, 1, 0, 0)
         end

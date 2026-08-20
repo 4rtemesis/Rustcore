@@ -188,7 +188,8 @@ local function PopulateRustedIcons(items, skipAnim)
         sepiaOverlay:SetTexture(item.tex or "Interface\\Icons\\INV_Misc_QuestionMark")
         sepiaOverlay:SetTexCoord(ICON_TEX_INSET, 1 - ICON_TEX_INSET, ICON_TEX_INSET, 1 - ICON_TEX_INSET)
         sepiaOverlay:SetDesaturation(1)
-        sepiaOverlay:SetVertexColor(1.0, 0.5, 0.2, 1)
+        -- Matches RustcoreDurability's muted sepia tint for the same effect.
+        sepiaOverlay:SetVertexColor(0.62, 0.55, 0.48, 1)
         sepiaOverlay:SetShown(i == 1)
 
         local border = CreateFrame("Frame", nil, cell)
