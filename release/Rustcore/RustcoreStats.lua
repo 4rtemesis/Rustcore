@@ -14,9 +14,9 @@ local DEFAULT_WIDTH, DEFAULT_HEIGHT = 350, 150
 local MIN_WIDTH, MIN_HEIGHT = 200, 125
 local MIN_HEIGHT_HORIZONTAL = 68
 local MAX_WIDTH, MAX_HEIGHT = 680, 300
-local BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT = 544, 548
 local BACKGROUND_ALPHA = 0.78
-local CORNER_SIZE = 14
+local STATS_BORDER_SIZE = 18
+local STATS_CONTENT_EDGE_PAD = 22
 local TEXT_PAD = 10
 -- Horizontal layout packs graphics much closer to the window's left/right
 -- edges than the two-row layout does, so it gets its own, roomier side
@@ -224,6 +224,130 @@ local function ApplyBodyFont(fontString, size)
     end
 end
 
+local function CreateStatsPanelArt(parent)
+    local opacity = Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA
+    local shadowOpacity = Rustcore.GetSetting("statsBackgroundShadow") or 0
+    local borderSize = STATS_BORDER_SIZE
+    local pieces = {}
+    local shadowPieces = {}
+    local borderPieces = {}
+    local shadowBorderPieces = {}
+
+    local function CreatePiece(name, textureName, layer, sublevel)
+        local texture = parent:CreateTexture(nil, layer or "BACKGROUND", nil, sublevel)
+        texture:SetTexture(Rustcore.GetAssetPath("UI/" .. textureName))
+        texture:SetTexCoord(0, 1, 0, 1)
+        texture:SetAlpha(opacity)
+        pieces[name] = texture
+        return texture
+    end
+
+    local function CreateShadowPiece(name, textureName)
+        local texture = parent:CreateTexture(nil, "BACKGROUND", nil, -1)
+        texture:SetTexture(Rustcore.GetAssetPath("UI/" .. textureName))
+        texture:SetTexCoord(0, 1, 0, 1)
+        texture:SetVertexColor(0, 0, 0, 1)
+        texture:SetAlpha(shadowOpacity)
+        shadowPieces[name] = texture
+        return texture
+    end
+
+    local centerShadow = CreateShadowPiece("center", "newstatsC.tga")
+    local center = CreatePiece("center", "newstatsC.tga")
+    centerShadow:SetPoint("TOPLEFT", parent, "TOPLEFT", borderSize, -borderSize)
+    centerShadow:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -borderSize, borderSize)
+    center:SetPoint("TOPLEFT", parent, "TOPLEFT", borderSize, -borderSize)
+    center:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -borderSize, borderSize)
+
+    local shade = parent:CreateTexture(nil, "ARTWORK")
+    shade:SetPoint("TOPLEFT", center, "TOPLEFT", 0, 0)
+    shade:SetPoint("BOTTOMRIGHT", center, "BOTTOMRIGHT", 0, 0)
+    shade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    shade:SetVertexColor(0, 0, 0, 0.10 * opacity)
+
+    local topShadow = CreateShadowPiece("top", "newstatsUB.tga")
+    local top = CreatePiece("top", "newstatsUB.tga", "ARTWORK")
+    topShadow:SetPoint("TOPLEFT", parent, "TOPLEFT", borderSize, 0)
+    topShadow:SetPoint("BOTTOMRIGHT", parent, "TOPRIGHT", -borderSize, -borderSize)
+    top:SetPoint("TOPLEFT", parent, "TOPLEFT", borderSize, 0)
+    top:SetPoint("BOTTOMRIGHT", parent, "TOPRIGHT", -borderSize, -borderSize)
+
+    local bottomShadow = CreateShadowPiece("bottom", "newstatsBB.tga")
+    local bottom = CreatePiece("bottom", "newstatsBB.tga", "ARTWORK")
+    bottomShadow:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", borderSize, borderSize)
+    bottomShadow:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -borderSize, 0)
+    bottom:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", borderSize, borderSize)
+    bottom:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -borderSize, 0)
+
+    local leftShadow = CreateShadowPiece("left", "newstatsLB.tga")
+    local left = CreatePiece("left", "newstatsLB.tga", "ARTWORK")
+    leftShadow:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -borderSize)
+    leftShadow:SetPoint("BOTTOMRIGHT", parent, "BOTTOMLEFT", borderSize, borderSize)
+    left:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -borderSize)
+    left:SetPoint("BOTTOMRIGHT", parent, "BOTTOMLEFT", borderSize, borderSize)
+
+    local rightShadow = CreateShadowPiece("right", "newstatsRB.tga")
+    local right = CreatePiece("right", "newstatsRB.tga", "ARTWORK")
+    rightShadow:SetPoint("TOPLEFT", parent, "TOPRIGHT", -borderSize, -borderSize)
+    rightShadow:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, borderSize)
+    right:SetPoint("TOPLEFT", parent, "TOPRIGHT", -borderSize, -borderSize)
+    right:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, borderSize)
+
+    local topLeftShadow = CreateShadowPiece("topLeft", "newstatsULC.tga")
+    local topLeft = CreatePiece("topLeft", "newstatsULC.tga", "ARTWORK")
+    topLeftShadow:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+    topLeftShadow:SetSize(borderSize, borderSize)
+    topLeft:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+    topLeft:SetSize(borderSize, borderSize)
+
+    local topRightShadow = CreateShadowPiece("topRight", "newstatsURC.tga")
+    local topRight = CreatePiece("topRight", "newstatsURC.tga", "ARTWORK")
+    topRightShadow:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    topRightShadow:SetSize(borderSize, borderSize)
+    topRight:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    topRight:SetSize(borderSize, borderSize)
+
+    local bottomLeftShadow = CreateShadowPiece("bottomLeft", "newstatsLLC.tga")
+    local bottomLeft = CreatePiece("bottomLeft", "newstatsLLC.tga", "ARTWORK")
+    bottomLeftShadow:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
+    bottomLeftShadow:SetSize(borderSize, borderSize)
+    bottomLeft:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
+    bottomLeft:SetSize(borderSize, borderSize)
+
+    local bottomRightShadow = CreateShadowPiece("bottomRight", "newstatsLRC.tga")
+    local bottomRight = CreatePiece("bottomRight", "newstatsLRC.tga", "ARTWORK")
+    bottomRightShadow:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+    bottomRightShadow:SetSize(borderSize, borderSize)
+    bottomRight:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+    bottomRight:SetSize(borderSize, borderSize)
+
+    borderPieces[1] = top
+    borderPieces[2] = bottom
+    borderPieces[3] = left
+    borderPieces[4] = right
+    borderPieces[5] = topLeft
+    borderPieces[6] = topRight
+    borderPieces[7] = bottomLeft
+    borderPieces[8] = bottomRight
+    shadowBorderPieces[1] = topShadow
+    shadowBorderPieces[2] = bottomShadow
+    shadowBorderPieces[3] = leftShadow
+    shadowBorderPieces[4] = rightShadow
+    shadowBorderPieces[5] = topLeftShadow
+    shadowBorderPieces[6] = topRightShadow
+    shadowBorderPieces[7] = bottomLeftShadow
+    shadowBorderPieces[8] = bottomRightShadow
+
+    return {
+        pieces = pieces,
+        shadowPieces = shadowPieces,
+        borderPieces = borderPieces,
+        shadowBorderPieces = shadowBorderPieces,
+        center = center,
+        shade = shade,
+    }
+end
+
 function RustcoreStats.RefreshPosition()
     if not statsFrame then return end
     ApplySavedPosition(statsFrame)
@@ -253,9 +377,10 @@ function RustcoreStats.RefreshLayout()
     local width, height = statsFrame:GetSize()
     local pad = TEXT_PAD
     local horizontal = Rustcore.GetSetting("statsHorizontalLayout")
-    local sidePad = horizontal and HORIZONTAL_SIDE_PAD or pad
+    local sidePad = math.max(horizontal and HORIZONTAL_SIDE_PAD or pad, STATS_CONTENT_EDGE_PAD)
+    local bestSidePad = math.max(BEST_ITEM_SIDE_PAD, STATS_CONTENT_EDGE_PAD)
     local contentWidth = math.max(1, width - (sidePad * 2))
-    local bestContentWidth = math.max(1, width - (BEST_ITEM_SIDE_PAD * 2))
+    local bestContentWidth = math.max(1, width - (bestSidePad * 2))
     local contentHeight = math.max(1, height - (pad * 2))
     local rowHeight = horizontal and contentHeight or ((contentHeight - ROW_GAP) / 2)
     local showRusted, showDestroyed = GetCounterVisibility()
@@ -337,8 +462,8 @@ function RustcoreStats.RefreshLayout()
         if showDestroyed then destroyedCenterX = PlaceCell(counterCellWidth) end
         bestCenterX = PlaceCell(bestCellWidth)
     elseif visibleCounterCount == 2 then
-        rustedCenterX = pad + (counterCellWidth * 0.5)
-        destroyedCenterX = pad + counterCellWidth + COLUMN_GAP + (counterCellWidth * 0.5)
+        rustedCenterX = sidePad + (counterCellWidth * 0.5)
+        destroyedCenterX = sidePad + counterCellWidth + COLUMN_GAP + (counterCellWidth * 0.5)
     elseif visibleCounterCount == 1 then
         rustedCenterX = width * 0.5
         destroyedCenterX = width * 0.5
@@ -409,21 +534,6 @@ function RustcoreStats.RefreshLayout()
     statsFrame.bestHitbox:SetPoint("CENTER", statsFrame.bestValue, "CENTER", 0, 0)
     statsFrame.bestHitbox:SetSize(math.max(1, statsFrame.bestValue:GetStringWidth() or 0), bestValueSize + 8)
 
-    local backgroundWidth = math.max(BACKGROUND_REF_WIDTH, width)
-    local backgroundHeight = math.max(BACKGROUND_REF_HEIGHT, height)
-    if statsFrame.background then
-        statsFrame.background:SetTexCoord(0, 1, 0, 1)
-        statsFrame.background:SetSize(backgroundWidth, backgroundHeight)
-    end
-    if statsFrame.backgroundShadow then
-        statsFrame.backgroundShadow:SetSize(backgroundWidth, backgroundHeight)
-    end
-    if statsFrame.backgroundClip then
-        statsFrame.backgroundClip:SetSize(math.max(1, width), math.max(1, height))
-    end
-    if statsFrame.backgroundScrollChild then
-        statsFrame.backgroundScrollChild:SetSize(backgroundWidth, backgroundHeight)
-    end
 end
 
 local function GetAutoFitWidth()
@@ -447,7 +557,7 @@ local function GetAutoFitWidth()
         local totalWidth = (counterCellWidth * visibleCounterCount)
             + bottomWidth
             + (math.max(0, slotCount - 1) * COLUMN_GAP)
-        return Clamp(math.ceil(totalWidth + (HORIZONTAL_SIDE_PAD * 2)), MIN_WIDTH, MAX_WIDTH)
+        return Clamp(math.ceil(totalWidth + (math.max(HORIZONTAL_SIDE_PAD, STATS_CONTENT_EDGE_PAD) * 2)), MIN_WIDTH, MAX_WIDTH)
     end
 
     local topWidth
@@ -458,8 +568,8 @@ local function GetAutoFitWidth()
     else
         topWidth = 0
     end
-    local requiredTopWidth = topWidth + (TEXT_PAD * 2)
-    local requiredBottomWidth = bottomWidth + (BEST_ITEM_SIDE_PAD * 2)
+    local requiredTopWidth = topWidth + (math.max(TEXT_PAD, STATS_CONTENT_EDGE_PAD) * 2)
+    local requiredBottomWidth = bottomWidth + (math.max(BEST_ITEM_SIDE_PAD, STATS_CONTENT_EDGE_PAD) * 2)
     return Clamp(math.ceil(math.max(requiredTopWidth, requiredBottomWidth)), MIN_WIDTH, MAX_WIDTH)
 end
 
@@ -484,53 +594,7 @@ local function BuildStatsFrame()
         f:SetMaxResize(MAX_WIDTH, MAX_HEIGHT)
     end
 
-    local bgClip = CreateFrame("ScrollFrame", nil, f)
-    bgClip:SetAllPoints(f)
-    bgClip:EnableMouse(false)
-    bgClip:SetFrameLevel(math.max(0, f:GetFrameLevel() - 1))
-
-    local bgChild = CreateFrame("Frame", nil, bgClip)
-    bgChild:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
-    bgClip:SetScrollChild(bgChild)
-
-    -- Solid black plane behind the background art itself (sublevel -1 is the
-    -- lowest possible draw layer, so nothing can end up in front of it by
-    -- accident). The background texture above it has its own independent
-    -- opacity slider, so this only becomes visible where that art is thin/
-    -- transparent or the background opacity is turned down.
-    local bgShadow = bgChild:CreateTexture(nil, "BACKGROUND", nil, -1)
-    bgShadow:SetPoint("TOPLEFT", bgChild, "TOPLEFT", 0, 0)
-    bgShadow:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
-    bgShadow:SetColorTexture(0, 0, 0, 1)
-    bgShadow:SetAlpha(Rustcore.GetSetting("statsBackgroundShadow") or 0)
-
-    local bg = bgChild:CreateTexture(nil, "BACKGROUND")
-    bg:SetPoint("TOPLEFT", bgChild, "TOPLEFT", 0, 0)
-    bg:SetSize(BACKGROUND_REF_WIDTH, BACKGROUND_REF_HEIGHT)
-    bg:SetTexture(Rustcore.GetAssetPath("UI/background" .. Rustcore.GetSetting("difficulty") .. " copy.tga"))
-    bg:SetAlpha(Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA)
-
-    local shade = f:CreateTexture(nil, "ARTWORK")
-    shade:SetAllPoints(f)
-    shade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
-    shade:SetVertexColor(0, 0, 0, 0.10 * (Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA))
-
-    local corners = {}
-    local function CreateCorner(point, textureName, xOff, yOff)
-        local corner = f:CreateTexture(nil, "ARTWORK")
-        corner:SetTexture(Rustcore.GetAssetPath("UI/" .. textureName))
-        corner:SetSize(CORNER_SIZE, CORNER_SIZE)
-        corner:SetPoint(point, f, point, xOff, yOff)
-        corner:SetTexCoord(0, 1, 0, 1)
-        corner:SetAlpha(Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA)
-        table.insert(corners, corner)
-        return corner
-    end
-
-    CreateCorner("TOPLEFT", "NutcornerUL.tga", 3, -3)
-    CreateCorner("TOPRIGHT", "NutcornerUR.tga", -3, -3)
-    CreateCorner("BOTTOMLEFT", "NutcornerUR.tga", 3, 3)
-    CreateCorner("BOTTOMRIGHT", "NutcornerUL.tga", -3, 3)
+    local panelArt = CreateStatsPanelArt(f)
 
     -- Alternate to the corner-rivet look: a standard Blizzard dialog frame border.
     -- Sized larger than the frame itself so the border art fully encloses the
@@ -551,7 +615,8 @@ local function BuildStatsFrame()
     end
     blizzardBorder:Hide()
 
-    f.corners = corners
+    f.borderPieces = panelArt.borderPieces
+    f.backgroundShadowBorderPieces = panelArt.shadowBorderPieces
     f.blizzardBorder = blizzardBorder
 
     f:RegisterForDrag("LeftButton")
@@ -738,18 +803,20 @@ local function BuildStatsFrame()
     f.bestValue = bestValue
     f.itemLostFrame = itemLostFrame
     f.bestHitbox = bestHitbox
-    f.backgroundClip = bgClip
-    f.backgroundScrollChild = bgChild
-    f.background = bg
-    f.backgroundShadow = bgShadow
-    f.shade = shade
+    f.backgroundPieces = panelArt.pieces
+    f.backgroundShadowPieces = panelArt.shadowPieces
+    f.background = panelArt.center
+    f.shade = panelArt.shade
     f.resizeGrip = resizeGrip
     ApplySavedPosition(f)
     RefreshText()
 
     local useBlizzardFrame = Rustcore.GetSetting("statsUseBlizzardFrame")
-    for _, corner in ipairs(f.corners) do
-        corner:SetShown(not useBlizzardFrame)
+    for _, piece in ipairs(f.borderPieces) do
+        piece:SetShown(not useBlizzardFrame)
+    end
+    for _, piece in ipairs(f.backgroundShadowBorderPieces) do
+        piece:SetShown(not useBlizzardFrame)
     end
     f.blizzardBorder:SetShown(useBlizzardFrame)
 
@@ -776,16 +843,17 @@ function RustcoreStats.ApplyVisibility()
 end
 
 function RustcoreStats.RefreshStyle()
-    if statsFrame and statsFrame.background then
-        statsFrame.background:SetTexture(Rustcore.GetAssetPath("UI/background" .. Rustcore.GetSetting("difficulty") .. " copy.tga"))
-    end
+    RustcoreStats.RefreshBackgroundOpacity()
 end
 
 function RustcoreStats.RefreshFrameStyle()
     if not statsFrame then return end
     local useBlizzardFrame = Rustcore.GetSetting("statsUseBlizzardFrame")
-    for _, corner in ipairs(statsFrame.corners or {}) do
-        corner:SetShown(not useBlizzardFrame)
+    for _, piece in ipairs(statsFrame.borderPieces or {}) do
+        piece:SetShown(not useBlizzardFrame)
+    end
+    for _, piece in ipairs(statsFrame.backgroundShadowBorderPieces or {}) do
+        piece:SetShown(not useBlizzardFrame)
     end
     if statsFrame.blizzardBorder then
         statsFrame.blizzardBorder:SetShown(useBlizzardFrame)
@@ -795,20 +863,20 @@ end
 function RustcoreStats.RefreshBackgroundOpacity()
     if not statsFrame then return end
     local opacity = Rustcore.GetSetting("statsBackgroundOpacity") or BACKGROUND_ALPHA
-    if statsFrame.background then
-        statsFrame.background:SetAlpha(opacity)
+    for _, piece in pairs(statsFrame.backgroundPieces or {}) do
+        piece:SetAlpha(opacity)
     end
     if statsFrame.shade then
         statsFrame.shade:SetVertexColor(0, 0, 0, 0.10 * opacity)
     end
-    for _, corner in ipairs(statsFrame.corners or {}) do
-        corner:SetAlpha(opacity)
-    end
 end
 
 function RustcoreStats.RefreshBackgroundShadow()
-    if not statsFrame or not statsFrame.backgroundShadow then return end
-    statsFrame.backgroundShadow:SetAlpha(Rustcore.GetSetting("statsBackgroundShadow") or 0)
+    if not statsFrame then return end
+    local opacity = Rustcore.GetSetting("statsBackgroundShadow") or 0
+    for _, piece in pairs(statsFrame.backgroundShadowPieces or {}) do
+        piece:SetAlpha(opacity)
+    end
 end
 
 function RustcoreStats.RegisterDestroyedItem(item)

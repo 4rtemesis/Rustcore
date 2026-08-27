@@ -13,18 +13,37 @@ local DIFF_DESCS  = {
     [4] = "Lose 50% of your equipped items on death (rounded up).",
     [5] = "Lose every equipped item on death.",
 } 
+local DIFF_COLORS = {
+    [1] = { 0.494, 0.663, 0.337 },
+    [2] = { 0.62, 0.58, 0.28 },
+    [3] = { 0.72, 0.43, 0.19 },
+    [4] = { 0.62, 0.22, 0.16 },
+    [5] = { 0.52, 0.07, 0.06 },
+}
 
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
-local DEFAULT_TITLE_TEXT = "Rustcore Options"
-local COMBAT_TITLE_TEXT = "Settings are locked\nwhile in combat"
-local TITLE_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
+local DEFAULT_TITLE_TEXT = "OPTIONS"
+local COMBAT_NOTE_TEXT = "Settings locked in combat"
+local RUSTED_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
-local TITLE_COLOR = { 0.85, 0.15, 0.15 }
-local PROFILE_SECTION_HEIGHT = 170
+local TITLE_COLOR = { 1, 1, 1 }
 
 local function ApplyBodyFont(fontString, size)
     if not fontString then return end
     fontString:SetFont(BODY_FONT_PATH, math.max(10, (size or 18) - 2), "")
+end
+
+local function ApplyDifficultyLabelStyle(slider, value)
+    local label = slider and slider.GetName and _G[slider:GetName().."Text"]
+    if not label then return end
+
+    local v = math.max(1, math.min(5, math.floor((value or 1) + 0.5)))
+    local color = DIFF_COLORS[v] or DIFF_COLORS[1]
+    label:SetText(DIFF_LABELS[v])
+    label:SetFont(RUSTED_FONT_PATH, 34, "")
+    label:SetTextColor(color[1], color[2], color[3])
+    label:SetShadowColor(0, 0, 0, 1)
+    label:SetShadowOffset(2, -2)
 end
 
 local function SettingsLocked()
@@ -40,8 +59,7 @@ local function ApplyDifficultyValue(slider, diffDesc, value)
     end
 
     if previous == v then
-        local txt = _G[slider:GetName().."Text"]
-        if txt then txt:SetText(DIFF_LABELS[v]) end
+        ApplyDifficultyLabelStyle(slider, v)
         diffDesc:SetText(DIFF_DESCS[v])
         local parent = slider:GetParent()
         if parent then
@@ -58,8 +76,7 @@ local function ApplyDifficultyValue(slider, diffDesc, value)
         return
     end
     PlaySoundFile(Rustcore.GetAssetPath("Audio/difficultysound.wav"), "Master")
-    local txt = _G[slider:GetName().."Text"]
-    if txt then txt:SetText(DIFF_LABELS[v]) end
+    ApplyDifficultyLabelStyle(slider, v)
     diffDesc:SetText(DIFF_DESCS[v])
     local parent = slider:GetParent()
     if parent then
@@ -114,6 +131,10 @@ local function RefreshCombatLockState(frame)
         if locked then frame.opacitySlider:Disable() else frame.opacitySlider:Enable() end
         frame.opacitySlider:SetAlpha(locked and 0.5 or 1)
     end
+    if frame.shadowSlider then
+        if locked then frame.shadowSlider:Disable() else frame.shadowSlider:Enable() end
+        frame.shadowSlider:SetAlpha(locked and 0.5 or 1)
+    end
 
     local controls = {
         frame.cbSelfFound,
@@ -148,18 +169,11 @@ local function RefreshCombatLockState(frame)
         frame.importDropdownClick:EnableMouse(not locked)
     end
 
+    if frame.titleText then
+        frame.titleText:SetText(DEFAULT_TITLE_TEXT)
+    end
     if frame.combatNote then
-        if locked then
-            if frame.titleText then
-                frame.titleText:SetText(COMBAT_TITLE_TEXT)
-            end
-            frame.combatNote:Show()
-        else
-            if frame.titleText then
-                frame.titleText:SetText(DEFAULT_TITLE_TEXT)
-            end
-            frame.combatNote:Hide()
-        end
+        if locked then frame.combatNote:Show() else frame.combatNote:Hide() end
     end
 end
 
@@ -167,32 +181,39 @@ end
 
 local function BuildOptionsFrame()
     local f = CreateFrame("Frame", "RustcoreOptionsFrame", UIParent, backdropTemplate)
-    f:SetSize(630, 618 + PROFILE_SECTION_HEIGHT)
-    f:SetPoint("CENTER", 0, 55)
+    f:SetSize(640, 560)
+    f:SetPoint("CENTER", 0, 20)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
+    f:SetClampedToScreen(true)
     RustcoreTheme.ApplyFrameSkin(f)
 
-    -- Title
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", f, "TOP", 0, -32)
-    title:SetFont(TITLE_FONT_PATH, 30, "")
+    -- Keep the difficulty artwork, but darken it enough for controls and labels.
+    local bgShade = f:CreateTexture(nil, "BACKGROUND", nil, 2)
+    bgShade:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -18)
+    bgShade:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 18)
+    bgShade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    bgShade:SetVertexColor(0, 0, 0, 0.62)
+
+    local titleFrame = CreateFrame("Frame", nil, f)
+    titleFrame:SetSize(96, 18)
+    titleFrame:SetPoint("CENTER", f, "TOP", 0, -7)
+    titleFrame:SetFrameLevel(f:GetFrameLevel() + 3)
+
+    local title = titleFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("CENTER", titleFrame, "CENTER", 0, -1)
+    title:SetWidth(92)
+    ApplyBodyFont(title, 16)
     title:SetTextColor(unpack(TITLE_COLOR))
     title:SetShadowColor(0, 0, 0, 0.6)
     title:SetShadowOffset(1, -1)
     title:SetText(DEFAULT_TITLE_TEXT)
     f.titleText = title
 
-    local bgShade = f:CreateTexture(nil, "ARTWORK")
-    bgShade:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -18)
-    bgShade:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 18)
-    bgShade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
-    bgShade:SetVertexColor(0, 0, 0, 0.10)
-
     local dragHandle = CreateFrame("Frame", nil, f)
     dragHandle:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
     dragHandle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -36, -10)
-    dragHandle:SetHeight(28)
+    dragHandle:SetHeight(38)
     dragHandle:EnableMouse(true)
     dragHandle:RegisterForDrag("LeftButton")
     dragHandle:SetScript("OnDragStart", function() f:StartMoving() end)
@@ -204,28 +225,21 @@ local function BuildOptionsFrame()
     closeBtn:SetScript("OnClick", function() f:Hide() end)
     RustcoreTheme.SkinExitButton(closeBtn)
 
-    local leftColX = 34
-    local rightColX = 290
-
-    -- Assigned later, near the OnShow handler; referenced by the Character
-    -- Profile import button, which is built earlier in this function.
     local RefreshAllControls
 
-    -- ── Difficulty section ────────────────────────────────────────────────────
     local diffHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    diffHeader:SetPoint("TOP", title, "BOTTOM", 0, -30)
+    diffHeader:SetPoint("TOP", f, "TOP", 0, -48)
     diffHeader:SetJustifyH("CENTER")
-    diffHeader:SetText("Difficulty Mode")
-    ApplyBodyFont(diffHeader, 20)
+    diffHeader:SetText("")
+    ApplyBodyFont(diffHeader, 18)
     f.diffHeader = diffHeader
 
-    -- Five-step slider (1=Lite, 2=Normal, 3=Hard, 4=Brutal, 5=Extreme)
     local slider = CreateFrame("Slider", "RustcoreDifficultySlider", f, "OptionsSliderTemplate")
-    slider:SetPoint("TOP", diffHeader, "BOTTOM", 0, -34)
-    slider:SetWidth(342)
+    slider:SetPoint("TOP", diffHeader, "BOTTOM", 0, -30)
+    slider:SetWidth(380)
     slider:SetMinMaxValues(1, 5)
     slider:SetValueStep(1)
-    local sliderTrack = RustcoreTheme.SkinSlider(slider, 376, -1)
+    local sliderTrack = RustcoreTheme.SkinSlider(slider, 400, -1)
 
     local sliderLow  = _G[slider:GetName().."Low"]
     local sliderHigh = _G[slider:GetName().."High"]
@@ -233,40 +247,41 @@ local function BuildOptionsFrame()
     if sliderLow then
         sliderLow:SetText("Rusted")
         sliderLow:ClearAllPoints()
-        sliderLow:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 10, -6)
-        ApplyBodyFont(sliderLow, 16)
+        sliderLow:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 4, -4)
+        ApplyBodyFont(sliderLow, 14)
     end
     if sliderHigh then
         sliderHigh:SetText("Dust")
         sliderHigh:ClearAllPoints()
-        sliderHigh:SetPoint("TOPRIGHT", sliderTrack, "BOTTOMRIGHT", -10, -6)
-        ApplyBodyFont(sliderHigh, 16)
+        sliderHigh:SetPoint("TOPRIGHT", sliderTrack, "BOTTOMRIGHT", -4, -4)
+        ApplyBodyFont(sliderHigh, 14)
     end
     if sliderText then
         sliderText:SetText(DIFF_LABELS[Rustcore.GetSetting("difficulty")])
         sliderText:ClearAllPoints()
-        sliderText:SetPoint("TOP", diffHeader, "BOTTOM", 0, -10)
+        sliderText:SetPoint("CENTER", diffHeader, "CENTER", 0, 0)
         sliderText:SetJustifyH("CENTER")
-        sliderText:SetWidth(110)
-        ApplyBodyFont(sliderText, 18)
+        sliderText:SetWidth(220)
+        ApplyDifficultyLabelStyle(slider, Rustcore.GetSetting("difficulty"))
     end
     f.sliderText = sliderText
 
     local diffDesc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    diffDesc:SetPoint("TOPLEFT", sliderTrack, "BOTTOMLEFT", 8, -26)
-    diffDesc:SetWidth(420)
-    diffDesc:SetJustifyH("LEFT")
+    diffDesc:SetPoint("TOP", sliderTrack, "BOTTOM", 0, -22)
+    diffDesc:SetWidth(490)
+    diffDesc:SetJustifyH("CENTER")
     diffDesc:SetTextColor(1, 0.82, 0)
     diffDesc:SetText(DIFF_DESCS[Rustcore.GetSetting("difficulty")])
-    ApplyBodyFont(diffDesc, 18)
+    ApplyBodyFont(diffDesc, 14)
 
     local combatNote = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    combatNote:SetPoint("BOTTOMLEFT", diffHeader, "TOPLEFT", -150, 8)
-    combatNote:SetWidth(480)
-    combatNote:SetJustifyH("LEFT")
-    combatNote:SetWordWrap(true)
+    combatNote:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -32)
+    combatNote:SetWidth(160)
+    combatNote:SetJustifyH("RIGHT")
+    combatNote:SetTextColor(1, 0.35, 0.25)
+    combatNote:SetText(COMBAT_NOTE_TEXT)
+    ApplyBodyFont(combatNote, 13)
     combatNote:Hide()
-    ApplyBodyFont(combatNote, 16)
     f.combatNote = combatNote
 
     slider:SetScript("OnValueChanged", function(self, value)
@@ -280,87 +295,178 @@ local function BuildOptionsFrame()
     f.diffSlider = slider
     f.diffDesc   = diffDesc
 
-    -- ── Exceptions section ────────────────────────────────────────────────────
-    local excHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    excHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", -8, -26)
-    excHeader:SetText("Exceptions")
-    ApplyBodyFont(excHeader, 20)
+    local content = CreateFrame("Frame", nil, f)
+    content:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -154)
+    content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 18)
 
-    local cbWeapon = MakeCheckbox(f,
+    local topRule = content:CreateTexture(nil, "ARTWORK")
+    topRule:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    topRule:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+    topRule:SetHeight(2)
+    topRule:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    topRule:SetVertexColor(0.7, 0.7, 0.7, 0.7)
+
+    local navWidth = 160
+    local navShade = content:CreateTexture(nil, "BACKGROUND", nil, 3)
+    navShade:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2)
+    navShade:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
+    navShade:SetWidth(navWidth)
+    navShade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    navShade:SetVertexColor(0, 0, 0, 0.72)
+
+    local navRule = content:CreateTexture(nil, "ARTWORK")
+    navRule:SetPoint("TOPLEFT", content, "TOPLEFT", navWidth, -2)
+    navRule:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", navWidth, 0)
+    navRule:SetWidth(2)
+    navRule:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    navRule:SetVertexColor(0.7, 0.7, 0.7, 0.6)
+
+    local function MakePage()
+        local page = CreateFrame("Frame", nil, content)
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", navWidth + 2, -2)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+        page:Hide()
+        return page
+    end
+
+    local function MakeHeader(page, text, y)
+        local header = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", page, "TOPLEFT", 26, y)
+        header:SetText(text)
+        ApplyBodyFont(header, 19)
+        return header
+    end
+
+    local function MakeRule(page, y)
+        local rule = page:CreateTexture(nil, "ARTWORK")
+        rule:SetPoint("TOPLEFT", page, "TOPLEFT", 20, y)
+        rule:SetPoint("TOPRIGHT", page, "TOPRIGHT", -20, y)
+        rule:SetHeight(1)
+        rule:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        rule:SetVertexColor(0.65, 0.65, 0.65, 0.55)
+        return rule
+    end
+
+    local gameplayPage = MakePage()
+    local interfacePage = MakePage()
+    local notificationsPage = MakePage()
+    local temperedPage = MakePage()
+
+    local interfaceScroll = CreateFrame(
+        "ScrollFrame",
+        "RustcoreInterfaceOptionsScrollFrame",
+        interfacePage,
+        "UIPanelScrollFrameTemplate"
+    )
+    interfaceScroll:SetPoint("TOPLEFT", interfacePage, "TOPLEFT", 0, 0)
+    interfaceScroll:SetPoint("BOTTOMRIGHT", interfacePage, "BOTTOMRIGHT", -24, 0)
+    interfaceScroll:EnableMouseWheel(true)
+
+    local interfaceContent = CreateFrame("Frame", nil, interfaceScroll)
+    interfaceContent:SetSize(410, 430)
+    interfaceScroll:SetScrollChild(interfaceContent)
+
+    local interfaceScrollBar = interfaceScroll.ScrollBar
+        or _G[interfaceScroll:GetName().."ScrollBar"]
+    interfaceScroll:SetScript("OnMouseWheel", function(_, delta)
+        if not interfaceScrollBar then return end
+        local minValue, maxValue = interfaceScrollBar:GetMinMaxValues()
+        local nextValue = interfaceScrollBar:GetValue() - (delta * 28)
+        interfaceScrollBar:SetValue(math.max(minValue, math.min(maxValue, nextValue)))
+    end)
+
+    -- Gameplay
+    local rulesHeader = MakeHeader(gameplayPage, "Rules", -20)
+    local cbSelfFound = MakeCheckbox(gameplayPage,
+        "Self-Found Mode",
+        "Blocks access to the mailbox, auction house, and player trading.",
+        rulesHeader, -6, "selfFound")
+
+    local cbPvpDeathProtection = MakeCheckbox(gameplayPage,
+        "Ignore PVP Death",
+        "If an enemy player damages you at any point during a combat, dying in the same combat will not mark any items for deletion.",
+        cbSelfFound, -4, "ignoreDeathAfterEnemyPlayerDamage")
+
+    local cbWeapon = MakeCheckbox(gameplayPage,
         "Keep Main Weapon",
         "Spares your main weapon from deletion.\n"
         .."Hunter: Ranged slot\n"
         .."Melee (Warrior/Paladin/Rogue/Shaman/Druid): Main Hand\n"
         .."Caster (Priest/Mage/Warlock): Wand if equipped, else Main Hand",
-        excHeader, -8, "keepMainWeapon")
+        cbPvpDeathProtection, -4, "keepMainWeapon")
 
-    local cbRepair = MakeCheckbox(f,
+    local cbRepair = MakeCheckbox(gameplayPage,
         "Allow Item Repair",
         "Allows repair at merchants. By default repair is always blocked.",
-        cbWeapon, -8, "allowRepair")
+        cbWeapon, -4, "allowRepair")
 
-    local cbPvpDeathProtection = MakeCheckbox(f,
-        "Ignore PVP Death",
-        "If an enemy player damages you at any point during a combat, dying in the same combat will not mark any items for deletion.",
-        cbRepair, -8, "ignoreDeathAfterEnemyPlayerDamage")
+    MakeRule(gameplayPage, -190)
+    local profileHeader = MakeHeader(gameplayPage, "Character Profile", -210)
 
-    local uiHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    uiHeader:SetPoint("TOPLEFT", cbPvpDeathProtection, "BOTTOMLEFT", 0, -16)
-    uiHeader:SetText("Interface")
-    ApplyBodyFont(uiHeader, 20)
+    local profileDesc = gameplayPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    profileDesc:SetPoint("TOPLEFT", profileHeader, "BOTTOMLEFT", 0, -6)
+    profileDesc:SetWidth(360)
+    profileDesc:SetJustifyH("LEFT")
+    profileDesc:SetText("Import settings from another character.")
+    ApplyBodyFont(profileDesc, 14)
 
-    local cbMinimap = MakeCheckbox(f,
+    -- Interface
+    local featuresHeader = MakeHeader(interfaceContent, "Features", -20)
+    local cbMinimap = MakeCheckbox(interfaceContent,
         "Show Minimap Button",
         "Show or hide the Rustcore minimap button.",
-        uiHeader, -8, "showMinimapButton")
+        featuresHeader, -6, "showMinimapButton")
 
-    local cbDurHUD = MakeCheckbox(f,
+    local cbDurHUD = MakeCheckbox(interfaceContent,
         "Show Durability HUD",
         "Replaces WoW's native durability frame with per-slot artwork. Only slots near 0 durability are shown by default. Reload UI to restore the original durability frame after disabling.",
-        cbMinimap, -8, "showDurabilityHUD")
+        cbMinimap, -4, "showDurabilityHUD")
 
-    local cbDurShowAll = MakeCheckbox(f,
+    local cbDurShowAll = MakeCheckbox(interfaceContent,
         "Always Show All Slots",
         "Show durability for every equipped slot at all times, not just items with low durability.",
-        cbDurHUD, -6, "showAllDurability", 34, 20, 14)
+        cbDurHUD, -3, "showAllDurability", 34, 20, 14)
 
-    local cbDurGrowUpward = MakeCheckbox(f,
+    local cbDurGrowUpward = MakeCheckbox(interfaceContent,
         "Grow Upward",
         "Makes the durability HUD grow upward from its anchor point instead of downward.",
-        cbDurShowAll, -6, "durHUDGrowUpward", 0, 20, 14)
+        cbDurShowAll, -3, "durHUDGrowUpward", 0, 20, 14)
 
-    local cbDurReverseOrder = MakeCheckbox(f,
+    local cbDurReverseOrder = MakeCheckbox(interfaceContent,
         "Reverse Order",
         "Reverses the durability HUD stack order, placing the most damaged item at the bottom instead of the top.",
-        cbDurGrowUpward, -6, "durHUDReverseOrder", 0, 20, 14)
+        cbDurGrowUpward, -3, "durHUDReverseOrder", 0, 20, 14)
 
-    local cbStats = MakeCheckbox(f,
+    local cbStats = MakeCheckbox(interfaceContent,
         "Show Stats Window",
         "Show or hide the Rustcore item loss stats window.",
-        cbDurReverseOrder, -12, "showStatsWindow", -34)
+        cbDurReverseOrder, -7, "showStatsWindow", -34)
 
-    local cbStatsHorizontal = MakeCheckbox(f,
+    local cbStatsHorizontal = MakeCheckbox(interfaceContent,
         "Horizontal Display",
         "Arranges all stats window elements in a single row instead of two.",
-        cbStats, -6, "statsHorizontalLayout", 34, 20, 14)
+        cbStats, -3, "statsHorizontalLayout", 34, 20, 14)
 
-    local cbStatsBlizzardFrame = MakeCheckbox(f,
-        "Use Default Blizzard Frame",
-        "Replaces the stats window's corner rivets with a standard Blizzard UI window border.",
-        cbStatsHorizontal, -6, "statsUseBlizzardFrame", 0, 20, 14)
+    local cbStatsBlizzardFrame = MakeCheckbox(interfaceContent,
+        "Use Default Frame",
+        "Replaces the stats window's custom border with a standard Blizzard UI window border.",
+        cbStatsHorizontal, -3, "statsUseBlizzardFrame", 0, 20, 14)
 
-    local opacitySlider = CreateFrame("Slider", "RustcoreStatsOpacitySlider", f, "OptionsSliderTemplate")
-    opacitySlider:SetPoint("TOPLEFT", cbStatsBlizzardFrame, "BOTTOMLEFT", 4, -34)
-    opacitySlider:SetWidth(140)
+    MakeRule(interfaceContent, -255)
+    MakeHeader(interfaceContent, "Appearance", -275)
 
-    local opacityLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local opacitySlider = CreateFrame("Slider", "RustcoreStatsOpacitySlider", interfaceContent, "OptionsSliderTemplate")
+    opacitySlider:SetPoint("TOPLEFT", interfaceContent, "TOPLEFT", 28, -320)
+    opacitySlider:SetWidth(180)
+
+    local opacityLabel = interfaceContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     opacityLabel:SetPoint("BOTTOM", opacitySlider, "TOP", 0, 6)
     opacityLabel:SetText("Background Opacity")
     ApplyBodyFont(opacityLabel, 14)
 
     opacitySlider:SetMinMaxValues(0, 1)
     opacitySlider:SetValueStep(0.01)
-    local opacityTrack = RustcoreTheme.SkinSlider(opacitySlider, 140, -1)
+    local opacityTrack = RustcoreTheme.SkinSlider(opacitySlider, 180, -1)
 
     local opacityLow  = _G[opacitySlider:GetName().."Low"]
     local opacityHigh = _G[opacitySlider:GetName().."High"]
@@ -395,18 +501,18 @@ local function BuildOptionsFrame()
     end)
     opacitySlider:SetValue(Rustcore.GetSetting("statsBackgroundOpacity"))
 
-    local shadowSlider = CreateFrame("Slider", "RustcoreStatsShadowSlider", f, "OptionsSliderTemplate")
-    shadowSlider:SetPoint("TOPLEFT", opacitySlider, "BOTTOMLEFT", 0, -48)
-    shadowSlider:SetWidth(140)
+    local shadowSlider = CreateFrame("Slider", "RustcoreStatsShadowSlider", interfaceContent, "OptionsSliderTemplate")
+    shadowSlider:SetPoint("TOPLEFT", interfaceContent, "TOPLEFT", 28, -385)
+    shadowSlider:SetWidth(180)
 
-    local shadowLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local shadowLabel = interfaceContent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     shadowLabel:SetPoint("BOTTOM", shadowSlider, "TOP", 0, 6)
-    shadowLabel:SetText("Background Shadow")
+    shadowLabel:SetText("Dark Overlay")
     ApplyBodyFont(shadowLabel, 14)
 
     shadowSlider:SetMinMaxValues(0, 1)
     shadowSlider:SetValueStep(0.01)
-    local shadowTrack = RustcoreTheme.SkinSlider(shadowSlider, 140, -1)
+    local shadowTrack = RustcoreTheme.SkinSlider(shadowSlider, 180, -1)
 
     local shadowLow  = _G[shadowSlider:GetName().."Low"]
     local shadowHigh = _G[shadowSlider:GetName().."High"]
@@ -441,65 +547,39 @@ local function BuildOptionsFrame()
     end)
     shadowSlider:SetValue(Rustcore.GetSetting("statsBackgroundShadow"))
 
-    -- ── Self-Found section ────────────────────────────────────────────────────
-    local sfHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sfHeader:SetPoint("TOPLEFT", diffDesc, "BOTTOMLEFT", rightColX - leftColX - 8, -26)
-    sfHeader:SetText("Self-Found")
-    ApplyBodyFont(sfHeader, 20)
-
-    local cbSelfFound = MakeCheckbox(f,
-        "Self-Found Mode",
-        "Blocks access to the mailbox, auction house, and player trading.",
-        sfHeader, -8, "selfFound")
-
-    -- ── Death broadcast section ───────────────────────────────────────────────
-    local bcHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bcHeader:SetPoint("TOPLEFT", cbSelfFound, "BOTTOMLEFT", 0, -16)
-    bcHeader:SetText("Death Broadcast")
-    ApplyBodyFont(bcHeader, 20)
-
-    local cbBroadcast = MakeCheckbox(f,
+    -- Notifications
+    local bcHeader = MakeHeader(notificationsPage, "Broadcast", -20)
+    local cbBroadcast = MakeCheckbox(notificationsPage,
         "Broadcast My Death",
         "Announces your death and the item you lost to other Rustcore users.",
-        bcHeader, -8, "broadcastDeaths")
+        bcHeader, -6, "broadcastDeaths")
 
-    local cbGuildMessage = MakeCheckbox(f,
-        "Guild Message",
+    local cbGuildMessage = MakeCheckbox(notificationsPage,
+        "Guild Broadcast",
         "Send a message in guild chat when you die with the item you lost.",
-        cbBroadcast, -8, "guildDeathMessage")
+        cbBroadcast, -4, "guildDeathMessage", 34, 20, 14)
 
-    local cbShowPopup = MakeCheckbox(f,
+    local cbShowPopup = MakeCheckbox(notificationsPage,
         "Show Death Messages",
         "Display a chat message when another Rustcore player dies.",
-        cbGuildMessage, -8, "showDeathPopup")
+        cbGuildMessage, -8, "showDeathPopup", -34)
 
-    local cbShowWarning = MakeCheckbox(f,
+    local cbShowWarning = MakeCheckbox(notificationsPage,
         "Show Center Warning",
         "Display a center-screen raid warning when another Rustcore player dies.",
-        cbShowPopup, -8, "showDeathWarning")
+        cbShowPopup, -4, "showDeathWarning")
 
-    -- ── Character Profile ─────────────────────────────────────────────
-    local profileHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    profileHeader:SetPoint("TOPLEFT", cbShowWarning, "BOTTOMLEFT", 0, -20)
-    profileHeader:SetText("Character Profile")
-    ApplyBodyFont(profileHeader, 20)
+    -- Tempered Souls
+    local waitingText = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    waitingText:SetPoint("TOPLEFT", temperedPage, "TOPLEFT", 26, -28)
+    waitingText:SetPoint("TOPRIGHT", temperedPage, "TOPRIGHT", -26, -28)
+    waitingText:SetJustifyH("LEFT")
+    waitingText:SetText("Waiting for tempered souls to appear.")
+    ApplyBodyFont(waitingText, 17)
 
-    local profileDesc = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    profileDesc:SetPoint("TOPLEFT", profileHeader, "BOTTOMLEFT", 0, -6)
-    profileDesc:SetWidth(230)
-    profileDesc:SetJustifyH("LEFT")
-    profileDesc:SetText("Import settings from another character.")
-    ApplyBodyFont(profileDesc, 14)
-
-    -- Custom-skinned dropdown: all native UIDropDownMenuTemplate art
-    -- (side textures + arrow button) is hidden, replaced with the
-    -- "Lostitemframe Dark copy" texture sized/centered directly (not
-    -- inset from the template's own bounds, so it isn't constrained by
-    -- the template's built-in padding). A full-size invisible button
-    -- handles clicks anywhere on the art.
-    local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown", f, "UIDropDownMenuTemplate")
+    local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown", gameplayPage, "UIDropDownMenuTemplate")
     importDropdown:SetPoint("TOPLEFT", profileDesc, "BOTTOMLEFT", 0, -10)
-    UIDropDownMenu_SetWidth(importDropdown, 150)
+    UIDropDownMenu_SetWidth(importDropdown, 190)
 
     local ddName = importDropdown:GetName()
     local ddLeft, ddMiddle, ddRight, ddButton, ddText, ddIcon =
@@ -513,7 +593,7 @@ local function BuildOptionsFrame()
 
     local ddBg = importDropdown:CreateTexture(nil, "BACKGROUND")
     ddBg:SetTexture(Rustcore.GetAssetPath("UI/Lostitemframe Dark copy.tga"))
-    ddBg:SetSize(141, 24) -- ~20% larger than the original inset-derived size, +10% more to match text overflow
+    ddBg:SetSize(190, 26)
     ddBg:SetPoint("TOPLEFT", importDropdown, "TOPLEFT", 0, 0)
 
     local PLACEHOLDER_COLOR = { 0.6, 0.6, 0.6 }
@@ -529,9 +609,9 @@ local function BuildOptionsFrame()
     local ddClick = CreateFrame("Button", nil, importDropdown)
     ddClick:SetAllPoints(ddBg)
 
-    local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    importBtn:SetSize(69, 18)
-    importBtn:SetPoint("TOPLEFT", ddBg, "BOTTOMLEFT", 0, -10)
+    local importBtn = CreateFrame("Button", nil, gameplayPage, "UIPanelButtonTemplate")
+    importBtn:SetSize(82, 22)
+    importBtn:SetPoint("LEFT", ddBg, "RIGHT", 12, 0)
     importBtn:SetText("Import")
     RustcoreTheme.SkinButton(importBtn)
     ApplyBodyFont(importBtn:GetFontString(), 14)
@@ -559,13 +639,6 @@ local function BuildOptionsFrame()
         ToggleDropDownMenu(1, nil, importDropdown, importDropdown, 0, 0)
     end)
 
-    -- Re-font the popout menu buttons to match BPpong and recenter the
-    -- list frame below our custom graphic whenever this dropdown's list
-    -- opens. Blizzard's ToggleDropDownMenu repositions and re-backdrops
-    -- the list frame AFTER calling Show() on it, so hooking OnShow was
-    -- too early (our changes got overwritten). Hooking the outer function
-    -- itself with hooksecurefunc runs after Blizzard's own logic finishes,
-    -- so our styling is the last thing applied and actually sticks.
     local function ApplyDropdownListStyle(level, value, dropDownFrame)
         if dropDownFrame ~= importDropdown then return end
         if UIDROPDOWNMENU_OPEN_MENU ~= ddName then return end
@@ -641,6 +714,86 @@ local function BuildOptionsFrame()
 
     RefreshImportDropdownText()
 
+    local pages = {
+        gameplay = gameplayPage,
+        interface = interfacePage,
+        notifications = notificationsPage,
+        tempered = temperedPage,
+    }
+    local tabs = {}
+
+    local function ShowPage(pageKey)
+        for key, page in pairs(pages) do
+            if key == pageKey then page:Show() else page:Hide() end
+        end
+        for key, tab in pairs(tabs) do
+            local selected = key == pageKey
+            if selected then tab.selectedOverlay:Show() else tab.selectedOverlay:Hide() end
+            local normalTexture = tab:GetNormalTexture()
+            if normalTexture then
+                if selected then
+                    normalTexture:SetVertexColor(0.52, 0.68, 1, 1)
+                else
+                    normalTexture:SetVertexColor(1, 1, 1, 1)
+                end
+            end
+            local tabText = tab:GetFontString()
+            if tabText then
+                tabText:SetTextColor(selected and 1 or 0.95, selected and 0.82 or 0.78, selected and 0 or 0.52)
+            end
+        end
+        f.activePage = pageKey
+    end
+
+    local function MakeTab(pageKey, label, index)
+        local tab = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+        tab:SetSize(navWidth, 42)
+        tab:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2 - ((index - 1) * 42))
+        tab:SetText(label)
+        RustcoreTheme.SkinButton(tab)
+        ApplyBodyFont(tab:GetFontString(), 17)
+
+        local nativeHighlight = tab:GetHighlightTexture()
+        if nativeHighlight then
+            nativeHighlight:SetTexture(nil)
+            nativeHighlight:Hide()
+        end
+        local normalTexture = tab:GetNormalTexture()
+        if normalTexture and normalTexture.SetDesaturated then
+            normalTexture:SetDesaturated(true)
+        end
+        local pushedTexture = tab:GetPushedTexture()
+        if pushedTexture then
+            if pushedTexture.SetDesaturated then pushedTexture:SetDesaturated(true) end
+            pushedTexture:SetVertexColor(0.42, 0.62, 1, 1)
+        end
+        if tab.rustcoreThemeHover then
+            tab.rustcoreThemeHover:SetBlendMode("BLEND")
+            tab.rustcoreThemeHover:SetVertexColor(0.16, 0.4, 0.86, 0.38)
+        end
+
+        local selectedOverlay = tab:CreateTexture(nil, "OVERLAY")
+        selectedOverlay:SetPoint("TOPLEFT", tab, "TOPLEFT", 2, -3)
+        selectedOverlay:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 2, 3)
+        selectedOverlay:SetWidth(4)
+        selectedOverlay:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        selectedOverlay:SetVertexColor(0.35, 0.62, 1, 0.95)
+        selectedOverlay:Hide()
+        tab.selectedOverlay = selectedOverlay
+
+        tab:SetScript("OnClick", function()
+            PlaySoundFile(Rustcore.GetAssetPath("Audio/ticksound2.wav"), "Master")
+            ShowPage(pageKey)
+        end)
+        tabs[pageKey] = tab
+    end
+
+    MakeTab("gameplay", "Gameplay", 1)
+    MakeTab("interface", "Interface", 2)
+    MakeTab("notifications", "Notifications", 3)
+    MakeTab("tempered", "Tempered Souls", 4)
+    ShowPage("gameplay")
+
     -- Store refs for Refresh
     f.cbSelfFound   = cbSelfFound
     f.cbWeapon      = cbWeapon
@@ -654,6 +807,7 @@ local function BuildOptionsFrame()
     f.cbStats       = cbStats
     f.cbStatsBlizzardFrame = cbStatsBlizzardFrame
     f.opacitySlider = opacitySlider
+    f.shadowSlider  = shadowSlider
     f.cbDurHUD      = cbDurHUD
     f.cbDurShowAll  = cbDurShowAll
     f.cbDurGrowUpward = cbDurGrowUpward
@@ -668,7 +822,7 @@ local function BuildOptionsFrame()
         local v = Rustcore.GetSetting("difficulty")
         RustcoreTheme.SetDifficultyBackground(self, v)
         self.diffSlider:SetValue(v)
-        if self.sliderText then self.sliderText:SetText(DIFF_LABELS[v]) end
+        ApplyDifficultyLabelStyle(self.diffSlider, v)
         self.diffDesc:SetText(DIFF_DESCS[v])
         self.cbSelfFound:Refresh()
         self.cbWeapon:Refresh()
@@ -682,6 +836,7 @@ local function BuildOptionsFrame()
         self.cbStats:Refresh()
         self.cbStatsBlizzardFrame:Refresh()
         self.opacitySlider:SetValue(Rustcore.GetSetting("statsBackgroundOpacity"))
+        self.shadowSlider:SetValue(Rustcore.GetSetting("statsBackgroundShadow"))
         self.cbDurHUD:Refresh()
         self.cbDurShowAll:Refresh()
         self.cbDurGrowUpward:Refresh()

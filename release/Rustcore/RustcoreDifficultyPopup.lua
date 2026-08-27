@@ -10,21 +10,15 @@ local HEADER_FONT_PATH = Rustcore.GetAssetPath("Font/RUSTED PERSONAL USE.ttf")
 local BODY_FONT_PATH   = Rustcore.GetAssetPath("Font/BPpong.otf")
 local BODY_COLOR = { 0.92, 0.89, 0.82 } -- off-white, used for the difficulty panel descriptions
 local WELCOME_TEXT_COLOR = { 1, 0.82, 0 } -- yellow, used for the intro description lines
-local INTRO_TITLE_COLOR = { 0.85, 0.15, 0.15 } -- same red as the options window title
 
 local FRAME_WIDTH, FRAME_HEIGHT = 560, 415
 local PANEL_WIDTH = 150
 local PANEL_HEIGHT = 136
 local PANEL_GAP  = 16
-local PANEL_CORNER_SIZE = 14
-local HEADER_FONT_SIZE = 25
+local HEADER_FONT_SIZE = 38
 local HEADER_LETTER_SPACING = 0
-local HEADER_Y_OFFSET = 26
+local HEADER_Y_OFFSET = 51
 local BODY_FONT_SIZE = 15
-local CORNER_COLOR_NORMAL   = { 0.55, 0.55, 0.55, 0.85 }
-local CORNER_COLOR_SELECTED = { 1, 1, 1, 1 }
-local UNSELECTED_BG_COLOR = { 0.55, 0.55, 0.55 }
-local SELECTED_BG_COLOR = { 0.9, 0.9, 0.9 } -- kept slightly dark rather than full white
 local DESATURATE_DIM = 0.55
 
 -- Grayscale-and-dim a color for the unselected-panel text state.
@@ -40,31 +34,25 @@ local SELECT_FONT_SIZE = 22
 local SELECT_LETTER_SPACING = 4
 local SELECT_TEXT_COLOR = { 0.85, 0.85, 0.82 }
 
--- index -> { difficulty value, background art, header text/color, body text }
--- Header colors run green -> yellow -> orange -> orange -> red across the
--- five difficulty tiers (only the Rusted/Broken/Dust tiers are offered in
--- this popup).
+-- Only the Rusted, Broken, and Dust tiers are offered in this popup.
 local PANEL_DATA = {
     {
         value = 1,
-        bg = "UI/background1 copy.tga",
         header = "RUSTED",
         headerColor = { 0.31, 0.49, 0.09 }, -- slightly more saturated, darker green
-        body = "You can no longer repair items.",
+        body = "No repair",
     },
     {
         value = 2,
-        bg = "UI/background2 copy.tga",
         header = "BROKEN",
         headerColor = { 0.68, 0.50, 0.02 }, -- slightly more saturated gold
-        body = "Death will break one of your equipped items and you can no longer repair.",
+        body = "Lose a piece of gear on death",
     },
     {
         value = 5,
-        bg = "UI/background5 copy.tga",
         header = "DUST",
         headerColor = { 0.85, 0.15, 0.15 }, -- same red as the options window title
-        body = "Death will disintigrate ALL of your equipped items and you can no longer repair.",
+        body = "Lose ALL gear on death",
     },
 }
 
@@ -156,33 +144,6 @@ local function BuildSelectButtonText(button, text)
     end
 end
 
--- Corner artwork: same rivet-style Nutcorner pieces used on the stats panel
--- (RustcoreStats.lua), reused across all four corners with no rotation.
-local function ApplyPanelCorners(panel)
-    local corners = {}
-    local function corner(point, texture, xOff, yOff)
-        local tex = panel:CreateTexture(nil, "OVERLAY")
-        tex:SetPoint(point, panel, point, xOff, yOff)
-        tex:SetSize(PANEL_CORNER_SIZE, PANEL_CORNER_SIZE)
-        tex:SetTexture(Rustcore.GetAssetPath("UI/" .. texture))
-        tex:SetTexCoord(0, 1, 0, 1)
-        corners[#corners + 1] = tex
-    end
-
-    corner("TOPLEFT",     "NutcornerUL.tga", 5, -5)
-    corner("TOPRIGHT",    "NutcornerUR.tga", -5, -5)
-    corner("BOTTOMLEFT",  "NutcornerUR.tga", 5, 5)
-    corner("BOTTOMRIGHT", "NutcornerUL.tga", -5, 5)
-
-    return corners
-end
-
-local function SetCornersColor(corners, color)
-    for _, tex in ipairs(corners) do
-        tex:SetVertexColor(unpack(color))
-    end
-end
-
 -- Recompute a panel's header/body text colors from its selected + hovering
 -- state. Hovering an unselected panel fully removes its desaturation, same
 -- as being selected.
@@ -202,26 +163,8 @@ local function ApplyPanelTextColors(panel)
 end
 
 local function BuildPanel(parent, index, data)
-    -- Cast-shadow plane, offset behind the panel. Sized to match the (inset)
-    -- bg art and shifted further down-right than it, so the shadow only
-    -- peeks out past the bottom and right edges, not all four.
-    local shadow = parent:CreateTexture(nil, "BACKGROUND", nil, -2)
-    shadow:SetSize(PANEL_WIDTH - 6, PANEL_HEIGHT - 6)
-    shadow:SetColorTexture(0, 0, 0, 0.4)
-
     local panel = CreateFrame("Button", nil, parent)
     panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
-
-    shadow:SetPoint("TOPLEFT", panel, "TOPLEFT", 5, -5)
-
-    local bg = panel:CreateTexture(nil, "BACKGROUND")
-    bg:SetPoint("TOPLEFT", panel, "TOPLEFT", 3, -3)
-    bg:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -3, 3)
-    bg:SetTexture(Rustcore.GetAssetPath(data.bg))
-    panel.bg = bg
-
-    panel.corners = ApplyPanelCorners(panel)
-    SetCornersColor(panel.corners, CORNER_COLOR_NORMAL)
 
     panel.headerColor = data.headerColor
     panel.headerLetters = BuildSpacedHeader(panel, data.header, data.headerColor)
@@ -278,7 +221,7 @@ end
 local function BuildFrame()
     local frame = CreateFrame("Frame", "RustcoreDifficultyPopupFrame", UIParent, backdropTemplate)
     frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
+    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
     -- FULLSCREEN_DIALOG sits above the DIALOG strata used by the options
     -- window, so the popup stays on top even if options is opened over it.
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -289,14 +232,11 @@ local function BuildFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     RustcoreTheme.ApplyFrameSkin(frame)
 
-    -- Darken the popup's background: a solid black plane behind the theme's
-    -- background art, with the art itself dropped to partial opacity so a
-    -- lot more of that black plane blends through and the whole window
-    -- reads noticeably darker.
-    local bgDarken = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
-    bgDarken:SetColorTexture(0, 0, 0, 1)
-    bgDarken:SetAllPoints(frame.rustcoreThemeBackground)
-    frame.rustcoreThemeBackground:SetAlpha(0.45)
+    -- Match the options window: difficulty artwork below a fixed dark overlay.
+    local bgShade = frame:CreateTexture(nil, "BACKGROUND", nil, 2)
+    bgShade:SetAllPoints(frame.rustcoreThemeBackground)
+    bgShade:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    bgShade:SetVertexColor(0, 0, 0, 0.62)
 
     local WELCOME_LINE1 = "Your gear is temporary. Your scars are not."
     local WELCOME_LINE2 = "Choose the hardship that will define your journey."
@@ -306,7 +246,7 @@ local function BuildFrame()
     -- the real text, since native shadowing doesn't render here.
     local titleShadow = frame:CreateFontString(nil, "OVERLAY")
     titleShadow:SetPoint("TOP", frame, "TOP", 1, -33)
-    titleShadow:SetFont(HEADER_FONT_PATH, 30, "")
+    titleShadow:SetFont(BODY_FONT_PATH, 26, "")
     titleShadow:SetTextColor(0, 0, 0, 0.75)
     titleShadow:SetJustifyH("CENTER")
     titleShadow:SetWidth(FRAME_WIDTH - 40)
@@ -315,8 +255,8 @@ local function BuildFrame()
 
     local title = frame:CreateFontString(nil, "OVERLAY")
     title:SetPoint("TOP", frame, "TOP", 0, -32)
-    title:SetFont(HEADER_FONT_PATH, 30, "")
-    title:SetTextColor(unpack(INTRO_TITLE_COLOR))
+    title:SetFont(BODY_FONT_PATH, 26, "")
+    title:SetTextColor(1, 1, 1)
     title:SetJustifyH("CENTER")
     title:SetWidth(FRAME_WIDTH - 40)
     title:SetWordWrap(false)
@@ -368,8 +308,26 @@ local function BuildFrame()
     end)
     RustcoreTheme.SkinExitButton(closeBtn)
 
+    local noteShadow = frame:CreateFontString(nil, "OVERLAY")
+    noteShadow:SetPoint("TOP", line2, "BOTTOM", 1, -8)
+    noteShadow:SetFont(BODY_FONT_PATH, 11, "")
+    noteShadow:SetTextColor(0, 0, 0, 0.75)
+    noteShadow:SetJustifyH("CENTER")
+    noteShadow:SetWidth(FRAME_WIDTH - 60)
+    noteShadow:SetWordWrap(true)
+    noteShadow:SetText(WELCOME_NOTE)
+
+    local note = frame:CreateFontString(nil, "OVERLAY")
+    note:SetPoint("TOP", line2, "BOTTOM", 0, -7)
+    note:SetFont(BODY_FONT_PATH, 11, "")
+    note:SetTextColor(0.6, 0.6, 0.6)
+    note:SetJustifyH("CENTER")
+    note:SetWidth(FRAME_WIDTH - 60)
+    note:SetWordWrap(true)
+    note:SetText(WELCOME_NOTE)
+
     local panelRow = CreateFrame("Frame", nil, frame)
-    panelRow:SetPoint("TOP", line2, "BOTTOM", 0, -20)
+    panelRow:SetPoint("TOP", note, "BOTTOM", 0, -18)
     panelRow:SetSize(PANEL_WIDTH * 3 + PANEL_GAP * 2, PANEL_HEIGHT)
 
     frame.panels = {}
@@ -379,27 +337,9 @@ local function BuildFrame()
         frame.panels[i] = panel
     end
 
-    local noteShadow = frame:CreateFontString(nil, "OVERLAY")
-    noteShadow:SetPoint("TOP", panelRow, "BOTTOM", 1, -13)
-    noteShadow:SetFont(BODY_FONT_PATH, 11, "")
-    noteShadow:SetTextColor(0, 0, 0, 0.75)
-    noteShadow:SetJustifyH("CENTER")
-    noteShadow:SetWidth(FRAME_WIDTH - 60)
-    noteShadow:SetWordWrap(true)
-    noteShadow:SetText(WELCOME_NOTE)
-
-    local note = frame:CreateFontString(nil, "OVERLAY")
-    note:SetPoint("TOP", panelRow, "BOTTOM", 0, -12)
-    note:SetFont(BODY_FONT_PATH, 11, "")
-    note:SetTextColor(0.6, 0.6, 0.6)
-    note:SetJustifyH("CENTER")
-    note:SetWidth(FRAME_WIDTH - 60)
-    note:SetWordWrap(true)
-    note:SetText(WELCOME_NOTE)
-
     local selectBtn = CreateFrame("Button", "RustcoreDifficultySelectButton", frame)
     selectBtn:SetSize(150, 56)
-    selectBtn:SetPoint("TOP", note, "BOTTOM", 0, -18)
+    selectBtn:SetPoint("TOP", panelRow, "BOTTOM", 0, -20)
     RustcoreTheme.SkinDeleteButton(selectBtn)
     -- Built directly here (same font/size/spacing/shadow as the DELETE
     -- button's own LayoutDeleteButtonLetters) instead of going through
@@ -420,15 +360,13 @@ end
 function RustcoreDifficultyPopup.SetSelected(index)
     if not f then return end
     f.selectedIndex = index
+    local selectedData = PANEL_DATA[index]
+    if selectedData then
+        RustcoreTheme.SetDifficultyBackground(f, selectedData.value)
+    end
     for i, panel in ipairs(f.panels) do
         local selected = (i == index)
         panel.selected = selected
-        if selected then
-            panel.bg:SetVertexColor(unpack(SELECTED_BG_COLOR))
-        else
-            panel.bg:SetVertexColor(unpack(UNSELECTED_BG_COLOR))
-        end
-        SetCornersColor(panel.corners, selected and CORNER_COLOR_SELECTED or CORNER_COLOR_NORMAL)
         ApplyPanelTextColors(panel)
     end
 end
