@@ -1,0 +1,249 @@
+--[[
+Copyright 2023-2025 Yazpad (Aaron Ma) - original author
+Copyright 2023-2026 Deathwing - current author
+The Deathlog AddOn is distributed under the terms of the GNU General Public License (or the Lesser GPL).
+This file is part of Deathlog.
+
+The Deathlog AddOn is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+The Deathlog AddOn is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with the Deathlog AddOn. If not, see <http://www.gnu.org/licenses/>.
+--]]
+local id_to_npc = DeathNotificationLib.ID_TO_NPC
+local npc_to_id = DeathNotificationLib.NPC_TO_ID
+local id_to_instance = DeathNotificationLib.ID_TO_INSTANCE
+
+local loaded_crt = false
+local widget_name = "Creature Ranking Tooltip"
+
+local creature_ranking = {}
+local creature_avg_lvl = {}
+
+function Deathlog_activateCreatureRankingTooltip()
+	if loaded_crt == false then
+		GameTooltip:HookScript("OnTooltipSetUnit", function()
+			local a, b = GameTooltip:GetUnit()
+			if UnitIsPlayer(b) then return end
+
+			if deathlog_settings[widget_name] and deathlog_settings[widget_name]["enable_crt"] then
+				if creature_ranking then
+					local rank = creature_ranking[a]
+					if rank then
+						GameTooltip:AddLine("#" .. rank .. " deadliest in Azeroth", 0.6, 0.6, 0.6, true)
+					end
+				end
+			end
+
+			if deathlog_settings[widget_name] and deathlog_settings[widget_name]["by_zone"] then
+				local _zone = C_Map.GetBestMapForUnit("player")
+				local zone_name = ""
+				if _zone then
+					local map_info = C_Map.GetMapInfo(_zone)
+					if map_info then
+						zone_name = map_info.name
+					else
+						zone_name = ""
+					end
+				else
+					local instance_name, _, _, _, _, _, _, _instance_id, _, _ = GetInstanceInfo()
+					zone_name = (id_to_instance[_instance_id] or instance_name)
+				end
+				local creature_ranking_by_zone = DeathlogDataCopy.PRECOMPUTED_MOST_DEADLY_BY_ZONE or {}
+				if creature_ranking_by_zone[_zone] then
+					local raw_id = npc_to_id[a]
+					local rank = nil
+					if type(raw_id) == "table" then
+						for _, id in ipairs(raw_id) do
+							rank = creature_ranking_by_zone[_zone][id]
+							if rank then break end
+						end
+					elseif raw_id then
+						rank = creature_ranking_by_zone[_zone][raw_id]
+					end
+					if rank then
+						GameTooltip:AddLine(
+							"#" .. rank .. " deadliest in " .. zone_name .. ".",
+							0.6,
+							0.6,
+							0.6,
+							true
+						)
+					end
+				end
+			end
+
+			if deathlog_settings[widget_name] and deathlog_settings[widget_name]["enable_avg_lvl"] then
+				if creature_avg_lvl[a] then
+					GameTooltip:AddLine(
+						"Avg. victim lvl. " .. string.format("%.1f", creature_avg_lvl[a]),
+						0.6,
+						0.6,
+						0.6,
+						true
+					)
+				end
+			end
+		end)
+	end
+	loaded_crt = true
+end
+
+local function handleEvent(self, event, ...)
+	if loaded_crt == false and deathlog_settings[widget_name] and deathlog_settings[widget_name]["enable_crt"] then
+		Deathlog_activateCreatureRankingTooltip()
+	end
+end
+local event_handler = CreateFrame("frame")
+event_handler:RegisterEvent("PLAYER_ENTERING_WORLD")
+event_handler:SetScript("OnEvent", handleEvent)
+
+local defaults = {
+	["enable_crt"] = true,
+	["enable_avg_lvl"] = true,
+	["crt_metric"] = "Normalized Score",
+	["by_zone"] = true,
+}
+
+local function applyDefaults(_defaults, force)
+	if deathlog_settings[widget_name] == nil then
+		deathlog_settings[widget_name] = {}
+	end
+	for k, v in pairs(_defaults) do
+		if deathlog_settings[widget_name][k] == nil or force then
+			deathlog_settings[widget_name][k] = v
+		end
+	end
+end
+
+local options = {}
+local optionsframe = nil
+function Deathlog_CRTWidget_applySettings()
+	applyDefaults(defaults)
+
+	if not DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS or not DeathlogDataCopy.PRECOMPUTED_LOG_NORMAL_PARAMS then return end
+
+	creature_ranking = {}
+	if deathlog_settings[widget_name]["enable_crt"] then
+		if deathlog_settings[widget_name]["crt_metric"] == "Total Kills" then
+			local most_deadly_units = DeathlogGetOrdered(DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS, { "all", "all", "all", nil })
+			for k, v in ipairs(most_deadly_units) do
+				if id_to_npc[v[1]] then
+					creature_ranking[id_to_npc[v[1]]] = k
+				end
+			end
+		elseif deathlog_settings[widget_name]["crt_metric"] == "Normalized Score" then
+			local log_normal_all = DeathlogDataCopy.PRECOMPUTED_LOG_NORMAL_PARAMS["all"]
+			if not log_normal_all or not log_normal_all[1] then return end
+			local most_deadly_units_normalized = DeathlogGetOrderedNormalized(
+				DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS,
+				{ "all", "all", "all", nil },
+				log_normal_all[1][1],
+				log_normal_all[1][2]
+			)
+
+			for k, v in ipairs(most_deadly_units_normalized) do
+				if id_to_npc[v[1]] then
+					creature_ranking[id_to_npc[v[1]]] = k
+				end
+			end
+		end
+	end
+
+	local all_stats = DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS
+		and DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS["all"]
+		and DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS["all"]["all"]
+		and DeathlogDataCopy.PRECOMPUTED_GENERAL_STATS["all"]["all"]["all"]
+	if all_stats then
+		for k, v in pairs(all_stats) do
+			if id_to_npc[k] then
+				creature_avg_lvl[id_to_npc[k]] = v["avg_lvl"]
+			end
+		end
+	end
+
+	Deathlog_activateCreatureRankingTooltip()
+
+	if optionsframe == nil then
+		LibStub("AceConfig-3.0"):RegisterOptionsTable(widget_name, options)
+		optionsframe = LibStub("AceConfigDialog-3.0"):AddToBlizOptions(widget_name, widget_name, "Deathlog")
+	end
+end
+
+local function forceReset()
+	applyDefaults(defaults, true)
+	Deathlog_CRTWidget_applySettings()
+end
+
+local metric_values = { ["Normalized Score"] = "Normalized Score", ["Total Kills"] = "Total Kills" }
+
+options = {
+	name = widget_name,
+	type = "group",
+	args = {
+		enable_crt = {
+			type = "toggle",
+			name = "Show Deadly Creature Ranking Tooltip",
+			desc = "Show Deadly Creature Ranking Tooltip.  This add a line to your tooltip when hovering over a creature, which specifies its rank.",
+			width = 1.6,
+			order = 1,
+			get = function()
+				return deathlog_settings[widget_name]["enable_crt"]
+			end,
+			set = function()
+				deathlog_settings[widget_name]["enable_crt"] = not deathlog_settings[widget_name]["enable_crt"]
+				Deathlog_CRTWidget_applySettings()
+			end,
+		},
+		enable_avg_lvl = {
+			type = "toggle",
+			name = "Show average level of slain victim.",
+			desc = "Shows the average level of the player that this creature has kill historically.",
+			width = 1.6,
+			order = 1,
+			get = function()
+				return deathlog_settings[widget_name]["enable_avg_lvl"]
+			end,
+			set = function()
+				deathlog_settings[widget_name]["enable_avg_lvl"] = not deathlog_settings[widget_name]["enable_avg_lvl"]
+				Deathlog_CRTWidget_applySettings()
+			end,
+		},
+		by_zone = {
+			type = "toggle",
+			name = "Show rank by zone.",
+			desc = "Shows the rank of the creature by zone.",
+			width = 1.6,
+			order = 1,
+			get = function()
+				return deathlog_settings[widget_name]["by_zone"]
+			end,
+			set = function()
+				deathlog_settings[widget_name]["by_zone"] = not deathlog_settings[widget_name]["by_zone"]
+				Deathlog_CRTWidget_applySettings()
+			end,
+		},
+		crt_metric = {
+			type = "select",
+			dialogControl = "LSM30_Font", --Select your widget here
+			name = "Creature Ranking Tooltip metric",
+			desc = "Which metric to use to rank creatures.\n\nNormalized score: #Kills/(1-CDF(lvl)).  This metric normalizes the creature kills based on the remaining population around that creatures kill level.\nTotal Kills: Just based on the number of kills a creature has.",
+			values = metric_values, -- pull in your font list from LSM
+			get = function()
+				return deathlog_settings[widget_name]["crt_metric"]
+			end,
+			set = function(self, key)
+				deathlog_settings[widget_name]["crt_metric"] = key
+				Deathlog_CRTWidget_applySettings()
+			end,
+			order = 2,
+		},
+	},
+}

@@ -1,0 +1,620 @@
+--[[
+Copyright 2023-2025 Yazpad (Aaron Ma) - original author
+Copyright 2023-2026 Deathwing - current author
+The Deathlog AddOn is distributed under the terms of the GNU General Public License (or the Lesser GPL).
+This file is part of Deathlog.
+
+The Deathlog AddOn is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+The Deathlog AddOn is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with the Deathlog AddOn. If not, see <http://www.gnu.org/licenses/>.
+--]]
+--
+local _watch_list_width = 1100
+local _inner_watch_list_width = 800
+local _watch_list_height = 600
+local current_map_id = nil
+local max_rows = 25
+local page_number = 1
+
+local selected_entry = 1
+local edit_box_type = nil
+
+local main_font = Deathlog_L.main_font
+
+local deathlog_tabcontainer = nil
+
+local class_tbl = Deathlog_class_tbl
+local race_tbl = Deathlog_race_tbl
+
+local deathlog_watch_list = nil
+
+local function EntryData(name, note)
+	return { ["Name"] = name, ["Note"] = note or "" }
+end
+
+local function isDead(_name)
+	local realmData = deathlog_data_map[GetRealmName()]
+	return realmData and realmData[_name]
+end
+
+local subtitle_data = {
+	{
+		"Name",
+		120,
+		function(_entry)
+			if _entry["Name"] == "" then
+				return "<Click to add>"
+			end
+			local _status = ""
+			if _entry["Name"] ~= nil then
+				if isDead(_entry["Name"]) then
+					_status = " |cffff0000(DEAD)|r"
+				end
+				return (_entry["Name"] .. _status)
+			end
+			return "<Click to add>"
+		end,
+	},
+	{
+		"Note",
+		650,
+		function(_entry)
+			if _entry["Note"] == "" then
+				return "<Click to add note>"
+			end
+			return _entry["Note"] or "<Click to add note>"
+		end,
+	},
+	{
+		"Last Checked",
+		100,
+		function(_entry)
+			if _entry["last_checked"] == nil then
+				return "Never"
+			end
+			local dur = abs(GetServerTime() - _entry["last_checked"])
+			if dur < 60 then
+				return ceil(dur) .. "s ago"
+			elseif dur < 3600 then
+				return ceil(dur / 60) .. "m ago"
+			else
+				return ceil(dur / 3600) .. "hr ago"
+			end
+		end,
+	},
+	{
+		"Icon",
+		100,
+		function(_entry)
+			return _entry["Icon"] or "<Click to set>"
+		end,
+	},
+	{
+		"Remove",
+		50,
+		function(_entry)
+			return "|TInterface\\WorldMap\\X_MARK_64:16:16:0:0:64:64:0:32:0:32|t"
+		end,
+	},
+}
+
+---@type MenuElementContainer
+local watch_list_frame = CreateFrame("Frame")
+watch_list_frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+watch_list_frame:SetSize(100, 100)
+watch_list_frame:Show()
+local font_strings = {} -- idx/columns
+local description_frame = {} -- idx/columns
+local header_strings = {} -- columns
+local row_backgrounds = {} --idx
+local status_string = watch_list_frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+
+if watch_list_frame.icon_dd == nil then
+	watch_list_frame.icon_dd = CreateFrame("Frame", nil, watch_list_frame, "UIDropDownMenuTemplate")
+end
+
+local dropdownFunctions = nil
+watch_list_frame.icon_dd:SetPoint("TOPLEFT", watch_list_frame, "BOTTOMLEFT", -20, 0)
+watch_list_frame.icon_dd:Hide()
+UIDropDownMenu_SetText(watch_list_frame.icon_dd, "")
+UIDropDownMenu_SetWidth(watch_list_frame.icon_dd, 50)
+UIDropDownMenu_Initialize(watch_list_frame.icon_dd, dropdownFunctions)
+UIDropDownMenu_JustifyText(watch_list_frame.icon_dd, "LEFT")
+
+local function setFontData(i, _entry)
+	for _, v in ipairs(subtitle_data) do
+		font_strings[i][v[1]]:SetText(v[3](_entry))
+		font_strings[i].name = _entry["Name"]
+	end
+end
+
+local function refreshFontData()
+	local i = 1
+	for _name, v in pairs(deathlog_watchlist_entries) do
+		setFontData(i, v)
+		i = i + 1
+	end
+	setFontData(i, {})
+	i = i + 1
+
+	for j = i, max_rows do
+		for _, v in ipairs(subtitle_data) do
+			font_strings[j][v[1]]:SetText("")
+		end
+		font_strings[j].name = nil
+	end
+end
+
+local last_font_string = nil
+for idx, v in ipairs(subtitle_data) do
+	header_strings[v[1]] = watch_list_frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	if idx == 1 then
+		header_strings[v[1]]:SetPoint("LEFT", watch_list_frame, "LEFT", 0, 0)
+	else
+		header_strings[v[1]]:SetPoint("LEFT", last_font_string, "RIGHT", 0, 0)
+	end
+	last_font_string = header_strings[v[1]]
+	header_strings[v[1]]:SetJustifyH("LEFT")
+	header_strings[v[1]]:SetWordWrap(false)
+
+	if idx + 1 <= #subtitle_data then
+		header_strings[v[1]]:SetWidth(v[2])
+	end
+	header_strings[v[1]]:SetTextColor(0.7, 0.7, 0.7)
+	header_strings[v[1]]:SetFont(main_font, 12, "")
+end
+
+for i = 1, max_rows do
+	font_strings[i] = {}
+	local last_font_string = nil
+	for idx, v in ipairs(subtitle_data) do
+		font_strings[i][v[1]] = watch_list_frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		if idx == 1 then
+			font_strings[i][v[1]]:SetPoint("LEFT", watch_list_frame, "LEFT", 0, 0)
+		else
+			font_strings[i][v[1]]:SetPoint("LEFT", last_font_string, "RIGHT", 0, 0)
+		end
+		last_font_string = font_strings[i][v[1]]
+		font_strings[i][v[1]]:SetJustifyH("LEFT")
+		font_strings[i][v[1]]:SetWordWrap(false)
+
+		if idx + 1 <= #subtitle_data then
+			font_strings[i][v[1]]:SetWidth(v[2])
+		end
+		font_strings[i][v[1]]:SetTextColor(1, 1, 1)
+		font_strings[i][v[1]]:SetFont(main_font, 10, "")
+	end
+
+	row_backgrounds[i] = watch_list_frame:CreateTexture(nil, "OVERLAY")
+	row_backgrounds[i]:SetParent(watch_list_frame)
+	row_backgrounds[i]:SetDrawLayer("OVERLAY", 2)
+	row_backgrounds[i]:SetVertexColor(0.5, 0.5, 0.5, (i % 2) / 10)
+	row_backgrounds[i]:SetHeight(16)
+	row_backgrounds[i]:SetWidth(1200)
+	row_backgrounds[i]:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+end
+
+local comm_query_lock_out = nil
+local last_time = nil
+local scroll_frame_ref = nil
+local ticker_handler = nil
+local cooldown_ticker = nil
+
+local function stopCooldownTicker()
+	if cooldown_ticker then
+		cooldown_ticker:Cancel()
+		cooldown_ticker = nil
+	end
+end
+
+local function updateCooldownText()
+	local time_til = 1
+	if last_time then
+		time_til = math.max(0, math.ceil(60 - (GetServerTime() - last_time)))
+	end
+	status_string:SetText("Can't refresh yet; wait " .. time_til .. " seconds and visit this tab again.")
+end
+
+local function ensureCooldownTicker()
+	if cooldown_ticker then
+		return
+	end
+	cooldown_ticker = C_Timer.NewTicker(1, function(self)
+		if not comm_query_lock_out or ticker_handler or not watch_list_frame:IsShown() then
+			self:Cancel()
+			cooldown_ticker = nil
+			return
+		end
+		updateCooldownText()
+	end)
+end
+
+local function checkAll()
+	if comm_query_lock_out then
+		if ticker_handler then
+			status_string:SetText("Querying for deaths...")
+			stopCooldownTicker()
+		else
+			updateCooldownText()
+			ensureCooldownTicker()
+		end
+		return
+	end
+
+	if ticker_handler then
+		ticker_handler:Cancel()
+		ticker_handler = nil
+	end
+	stopCooldownTicker()
+
+	comm_query_lock_out = C_Timer.NewTimer(60, function(cb)
+		cb:Cancel()
+		comm_query_lock_out = nil
+		stopCooldownTicker()
+	end)
+
+	status_string:SetText("Querying for deaths...")
+	last_time = GetServerTime()
+
+	-- Batch channel query: broadcast all un-dead names at once to
+	-- every Deathlog user on the realm.  Responses come back via the
+	-- existing COMM_QUERY_ACK whisper handler.
+	local channel_names = {}
+	for _name, _ in pairs(deathlog_watchlist_entries) do
+		if deathlog_watchlist_entries[_name] then
+			deathlog_watchlist_entries[_name]["last_checked"] = last_time
+		end
+		if isDead(_name) == nil then
+			table.insert(channel_names, _name)
+		end
+	end
+	refreshFontData()
+	if #channel_names > 0 then
+		DeathNotificationLib.QueryChannel(channel_names, "DLG")
+	end
+
+	-- Also query guild/say per-name as a slower fallback for
+	-- players not on the death alerts channel.
+	local idx = 1
+	ticker_handler = C_Timer.NewTicker(5, function(self)
+		if watch_list_frame:IsShown() then
+			refreshFontData()
+		end
+		if font_strings[idx] == nil or font_strings[idx].name == nil or font_strings[idx].name == "" then
+			self:Cancel()
+			ticker_handler = nil
+			if comm_query_lock_out then
+				updateCooldownText()
+				ensureCooldownTicker()
+			else
+				status_string:SetText("Done querying!")
+			end
+			return
+		end
+		local _name = font_strings[idx].name
+		if isDead(_name) == nil then
+			if deathlog_watchlist_entries[_name] then
+				deathlog_watchlist_entries[_name]["last_checked"] = GetServerTime()
+			end
+			DeathNotificationLib.QueryGuild(_name, "DLG")
+			DeathNotificationLib.QuerySay(_name, "DLG")
+		end
+		idx = idx + 1
+	end, 20)
+end
+
+function watch_list_frame.updateMenuElement(scroll_frame)
+	scroll_frame_ref = scroll_frame
+	watch_list_frame:SetParent(scroll_frame.frame)
+	watch_list_frame:Show()
+	watch_list_frame:ClearAllPoints()
+	watch_list_frame:SetPoint("TOPLEFT", scroll_frame.frame, "TOPLEFT", 0, -80)
+	watch_list_frame:SetWidth(1040)
+	watch_list_frame:SetHeight(880)
+
+	if watch_list_frame.name_box == nil then
+		watch_list_frame.name_box = CreateFrame("EditBox", nil, watch_list_frame, "InputBoxTemplate")
+	end
+
+	if watch_list_frame.name_box.text == nil then
+		watch_list_frame.name_box.text = watch_list_frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	end
+
+	watch_list_frame.name_box:SetPoint("TOPLEFT", watch_list_frame, "TOPLEFT", 0, 20)
+	watch_list_frame.name_box:SetPoint("BOTTOMLEFT", watch_list_frame, "TOPLEFT", 75, -50)
+	watch_list_frame.name_box:SetWidth(100)
+	watch_list_frame.name_box:SetFont(Deathlog_L.deadliest_creature_container_font, 14, "")
+	watch_list_frame.name_box:SetMovable(false)
+	watch_list_frame.name_box:SetBlinkSpeed(1)
+	-- watch_list_frame.name_box:SetAutoFocus(false)
+	watch_list_frame.name_box:SetMultiLine(false)
+	-- Default cap; overridden per-field on click (20 for names, 100 for notes).
+	watch_list_frame.name_box:SetMaxLetters(20)
+	watch_list_frame.name_box:SetScript("OnEnterPressed", function(self, msg)
+		if edit_box_type == 1 then
+			local name = font_strings[selected_entry].name
+			if name == nil then
+				return
+			end
+			if deathlog_watchlist_entries[name] == nil then
+				return
+			end
+			deathlog_watchlist_entries[name]["Note"] = watch_list_frame.name_box:GetText()
+			watch_list_frame.updateMenuElement(scroll_frame)
+		else
+			local old_name = font_strings[selected_entry] and font_strings[selected_entry].name
+			local _name = watch_list_frame.name_box:GetText():gsub("^%s+", ""):gsub("%s+$", "")
+			_name = _name:gsub("^%l", string.upper)
+			-- Don't create blank/placeholder watch list rows; just refresh.
+			if _name == "" or _name == "<Click to add>" then
+				watch_list_frame.updateMenuElement(scroll_frame)
+				return
+			end
+			if old_name then
+				deathlog_watchlist_entries[old_name] = nil
+			end
+			deathlog_watchlist_entries[_name] = {
+				["Name"] = _name,
+				["Icon"] = "|TInterface\\TARGETINGFRAME\\UI-RaidTargetingIcon_7:16:16:0:0:64:64:|t",
+			}
+			watch_list_frame.updateMenuElement(scroll_frame)
+		end
+	end)
+
+	watch_list_frame.name_box.text:SetPoint("LEFT", watch_list_frame.name_box, "LEFT", 0, 15)
+	watch_list_frame.name_box.text:SetFont(Deathlog_L.deadliest_creature_container_font, 12, "")
+	watch_list_frame.name_box.text:SetTextColor(255 / 255, 215 / 255, 0)
+	watch_list_frame.name_box.text:Show()
+
+	status_string:SetPoint("TOPLEFT", watch_list_frame, "TOPLEFT", 0, -400)
+	dropdownFunctions = function(frame, level, menuList)
+		local current_icon = ""
+		local sel_name = font_strings[selected_entry] and font_strings[selected_entry].name
+		if sel_name and deathlog_watchlist_entries[sel_name] then
+			current_icon = deathlog_watchlist_entries[sel_name]["Icon"] or ""
+		end
+		UIDropDownMenu_SetText(watch_list_frame.icon_dd, current_icon)
+
+		local function setIcon(icon_str)
+			local name = font_strings[selected_entry].name
+			if name == nil then
+				return
+			end
+			if deathlog_watchlist_entries[name] == nil then
+				return
+			end
+			deathlog_watchlist_entries[name]["Icon"] = icon_str
+			UIDropDownMenu_SetText(watch_list_frame.icon_dd, icon_str)
+			watch_list_frame.updateMenuElement(scroll_frame)
+		end
+
+		local icons = {
+			"|T133784:16|t",
+			"|TInterface\\TARGETINGFRAME\\UI-RaidTargetingIcon_7:16:16:0:0:64:64:|t",
+			"|TInterface\\COMMON\\friendship-heart:16:16:0:0:64:64:|t",
+		}
+		for _, icon_str in ipairs(icons) do
+			local info = UIDropDownMenu_CreateInfo()
+			info.text = icon_str
+			info.checked = current_icon == icon_str
+			info.func = function()
+				setIcon(icon_str)
+			end
+			UIDropDownMenu_AddButton(info)
+		end
+	end
+	UIDropDownMenu_Initialize(watch_list_frame.icon_dd, dropdownFunctions)
+	watch_list_frame.icon_dd:Hide()
+
+	local last_frame = watch_list_frame
+	local shift = 0
+	for i = 1, max_rows do
+		local idx = 101 - i
+
+		local _entry = CreateFrame("Frame", nil, watch_list_frame)
+		_entry:SetWidth(watch_list_frame:GetWidth())
+		_entry:SetHeight(15)
+		if shift == 0 then
+			_entry:SetPoint("TOPLEFT", last_frame, "TOPLEFT", 0, 0)
+		else
+			_entry:SetPoint("TOPLEFT", last_frame, "BOTTOMLEFT", 0, 0)
+		end
+		shift = -30
+		last_frame = _entry
+
+		font_strings[i][subtitle_data[1][1]]:SetPoint("LEFT", _entry, "LEFT", 0, 0)
+		font_strings[i][subtitle_data[1][1]]:Show()
+		for _, v in ipairs(subtitle_data) do
+			font_strings[i][v[1]]:SetParent(_entry)
+		end
+
+		row_backgrounds[i]:SetPoint("LEFT", _entry, "LEFT", 0, 0)
+		row_backgrounds[i]:SetParent(_entry)
+		row_backgrounds[i]:SetWidth(_entry:GetWidth())
+
+		_entry:SetWidth(watch_list_frame:GetWidth())
+
+		_entry:SetScript("OnEnter", function(widget)
+			local hash = isDead(font_strings[i].name)
+			if hash == nil then
+				return
+			end
+			GameTooltip_SetDefaultAnchor(GameTooltip, WorldFrame)
+			Deathlog_setTooltipFromEntry(deathlog_data[GetRealmName()][hash])
+			GameTooltip:Show()
+		end)
+
+		_entry:SetScript("OnLeave", function(widget)
+			GameTooltip:Hide()
+		end)
+
+		_entry:SetScript("OnMouseDown", function(self, button)
+			selected_entry = i
+			if button == "RightButton" then
+				return
+			else
+				if font_strings[i]["Name"]:GetText() == "" or font_strings[i]["Name"]:GetText() == nil then
+					return
+				end
+
+				-- GetLeft() is in the entry's own (scaled) coordinate space, so the
+				-- cursor must be divided by the entry's effective scale — which
+				-- includes the Deathlog menu's user-adjustable scale — not UIParent's.
+				local ui_scale = _entry:GetEffectiveScale()
+				local x = GetCursorPosition() / ui_scale
+				local pos_x = x - _entry:GetLeft()
+				local note_left = font_strings[i]["Note"]:GetLeft() - _entry:GetLeft()
+				local icon_left = font_strings[i]["Icon"]:GetLeft() - _entry:GetLeft()
+				local remove_left = font_strings[i]["Remove"]:GetLeft() - _entry:GetLeft()
+				if pos_x < note_left then
+					edit_box_type = 0
+					local function setEditBox(other)
+						watch_list_frame.name_box:ClearAllPoints()
+						watch_list_frame.name_box:SetPoint(
+							"LEFT",
+							other,
+							"LEFT",
+							font_strings[i]["Name"]:GetLeft() - _entry:GetLeft(),
+							0
+						)
+						watch_list_frame.name_box:SetWidth(120)
+						watch_list_frame.name_box:SetHeight(15)
+					end
+					setEditBox(_entry)
+					-- Character names cap at 12; 20 leaves headroom for the status suffix.
+					watch_list_frame.name_box:SetMaxLetters(20)
+					watch_list_frame.name_box:SetText((font_strings[i]["Name"]:GetText() or "<Click to add>"))
+					font_strings[i]["Name"]:SetText("")
+					watch_list_frame.name_box:HighlightText()
+					watch_list_frame.name_box:SetFocus()
+
+					watch_list_frame.name_box:Show()
+				elseif pos_x >= note_left and pos_x < (note_left + subtitle_data[2][2]) then
+					edit_box_type = 1
+					local function setEditBox(other)
+						watch_list_frame.name_box:ClearAllPoints()
+						watch_list_frame.name_box:SetPoint(
+							"LEFT",
+							other,
+							"LEFT",
+							font_strings[i]["Note"]:GetLeft() - _entry:GetLeft(),
+							0
+						)
+						watch_list_frame.name_box:SetWidth(400)
+						watch_list_frame.name_box:SetHeight(15)
+					end
+					setEditBox(_entry)
+					-- Notes are free-text reminders; the column is wide (650px), so
+					-- allow a full sentence rather than the 20-letter name cap.
+					watch_list_frame.name_box:SetMaxLetters(100)
+					watch_list_frame.name_box:SetText((font_strings[i]["Note"]:GetText() or "<Click to add note>"))
+					font_strings[i]["Note"]:SetText("")
+					watch_list_frame.name_box:HighlightText()
+					watch_list_frame.name_box:SetFocus()
+
+					watch_list_frame.name_box:Show()
+				elseif pos_x >= icon_left and pos_x < remove_left then
+					local selected_name = font_strings[i].name
+					local selected_icon = ""
+					if selected_name and deathlog_watchlist_entries[selected_name] then
+						selected_icon = deathlog_watchlist_entries[selected_name]["Icon"] or ""
+					end
+					UIDropDownMenu_SetText(watch_list_frame.icon_dd, selected_icon)
+					watch_list_frame.icon_dd:SetParent(_entry)
+					watch_list_frame.icon_dd:ClearAllPoints()
+					watch_list_frame.icon_dd:SetPoint(
+						"LEFT",
+						_entry,
+						"LEFT",
+						font_strings[i]["Icon"]:GetLeft() - _entry:GetLeft() - 20,
+						0
+					)
+					watch_list_frame.icon_dd:Show()
+					UIDropDownMenu_SetWidth(watch_list_frame.icon_dd, 50)
+				elseif pos_x >= remove_left then
+					-- Remove is the last actionable column; treat clicks from
+					-- the X icon to the row's right edge as a remove so the
+					-- small X texture is reliably clickable.
+					local remove_name = font_strings[i].name
+					if remove_name ~= nil and deathlog_watchlist_entries[remove_name] then
+						deathlog_watchlist_entries[remove_name] = nil
+						watch_list_frame.updateMenuElement(
+							scroll_frame
+						)
+					end
+				end
+			end
+		end)
+	end
+	watch_list_frame.name_box:Hide()
+
+	header_strings[subtitle_data[1][1]]:SetPoint("TOPLEFT", font_strings[1]["Name"], "TOPLEFT", 0, 20)
+	header_strings[subtitle_data[1][1]]:Show()
+	for _, v in ipairs(subtitle_data) do
+		header_strings[v[1]]:SetParent(watch_list_frame)
+		header_strings[v[1]]:SetText(v[1])
+	end
+	checkAll()
+
+	refreshFontData()
+	scroll_frame.frame:HookScript("OnHide", function()
+		if ticker_handler then
+			ticker_handler:Cancel()
+			ticker_handler = nil
+		end
+		stopCooldownTicker()
+		watch_list_frame:Hide()
+	end)
+end
+
+function Deathlog_WatchList()
+	return watch_list_frame
+end
+
+-- Reactive watchlist death detection -----------------------------------------
+-- Fires for every incoming death (sync manager, peer broadcast, query, etc.)
+-- and checks whether the dead player was on the watchlist.
+local function onWatchlistDeath(_player_data)
+	if not _player_data or not _player_data["name"] then
+		return
+	end
+	local _name = _player_data["name"]
+	if deathlog_watchlist_entries[_name] then
+		deathlog_watchlist_entries[_name]["last_checked"] = GetServerTime()
+		local icon = deathlog_watchlist_entries[_name]["Icon"] or ""
+		print("|cffff0000[Deathlog Watchlist]|r " .. icon .. " " .. _name .. " has died!")
+	end
+end
+
+-- On login: scan for deaths that occurred while offline, then register the
+-- reactive hook so future deaths from any source are caught automatically.
+local watchlist_event_handler = CreateFrame("Frame")
+watchlist_event_handler:RegisterEvent("PLAYER_ENTERING_WORLD")
+watchlist_event_handler:SetScript("OnEvent", function(self, event)
+	-- Small delay so deathlog.lua's PLAYER_ENTERING_WORLD has time to
+	-- initialise deathlog_data_map and call AttachAddon first.
+	C_Timer.After(4, function()
+		-- 1) Offline-death check: scan the local DB for any watched names
+		for _name, entry in pairs(deathlog_watchlist_entries) do
+			if isDead(_name) then
+				local icon = entry["Icon"] or ""
+				print("|cffff0000[Deathlog Watchlist]|r " .. icon .. " " .. _name .. " died while you were away!")
+			end
+		end
+
+		-- 2) Register reactive hook for all future deaths (sync, broadcast, etc.)
+		DeathNotificationLib.HookOnNewEntry(function(_player_data, _checksum, num_peer_checks, in_guild, source)
+			onWatchlistDeath(_player_data)
+		end)
+	end)
+	self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+end)
