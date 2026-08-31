@@ -68,6 +68,12 @@ local ICON_INSET       = 0.08                     -- texcoord crop (removes bord
 -- vivid orange so the rusted-wipe overlay reads more clearly against it.
 local SEPIA_R, SEPIA_G, SEPIA_B = 0.62, 0.55, 0.48
 
+-- The sepia overlay ramps in gradually from full durability up to this cap
+-- by the time the item reaches the low-durability threshold, rather than
+-- snapping straight to fully desaturated; from the threshold down to 0 the
+-- rust wipe (rustedTex) takes over and the sepia alpha holds steady here.
+local SEPIA_ALPHA_CAP = 0.9
+
 -- Colors are blended toward gray by this much to soften the raw neon RGB mix below.
 local COLOR_SATURATION = 0.85
 
@@ -78,18 +84,36 @@ local function Desaturate(r, g, b)
            gray + (b - gray) * COLOR_SATURATION
 end
 
--- Green (100%) → Yellow (at the low-durability threshold) → Red (0%)
+-- Midpoint (as a fraction of max durability) at which the digit colour sits
+-- exactly at yellow. Deliberately independent of GetLowThresholdPct — that
+-- threshold still drives the sepia/rust visual effects and the "show in
+-- normal mode" cutoff below, but the numeric colour ramp uses a fixed 50%
+-- point so green/yellow/red are spread evenly across the whole range instead
+-- of yellow being crammed into the last 5-20%.
+local COLOR_MIDPOINT_PCT = 0.5
+
+-- Green (100%) → Yellow (at COLOR_MIDPOINT_PCT) → Red (0%)
 local function GetDurabilityColor(current, maximum)
     if maximum == 0 or current == 0 then return Desaturate(1, 0, 0) end
     local pct = math.min(1, current / maximum)
-    local threshold = GetLowThresholdPct(maximum)
-    if pct >= threshold then
-        local t = (pct - threshold) / (1 - threshold)  -- 0 at threshold (yellow) → 1 at full (green)
+    if pct >= COLOR_MIDPOINT_PCT then
+        local t = (pct - COLOR_MIDPOINT_PCT) / (1 - COLOR_MIDPOINT_PCT)  -- 0 at midpoint (yellow) → 1 at full (green)
         return Desaturate(1 - t, 1, 0)
     else
-        local t = pct / threshold  -- 1 at threshold (yellow) → 0 at empty (red)
+        local t = pct / COLOR_MIDPOINT_PCT  -- 1 at midpoint (yellow) → 0 at empty (red)
         return Desaturate(1, t, 0)
     end
+end
+
+-- 0 at full durability → SEPIA_ALPHA_CAP right at the low-durability
+-- threshold, then held flat below the threshold (the rust wipe takes over
+-- from there instead of pushing desaturation any further).
+local function GetSepiaAlpha(pct, threshold)
+    if pct <= threshold then return SEPIA_ALPHA_CAP end
+    local range = 1 - threshold
+    if range <= 0 then return SEPIA_ALPHA_CAP end
+    local t = Clamp((1 - pct) / range, 0, 1)
+    return t * SEPIA_ALPHA_CAP
 end
 
 -- ── Rolling digit animation (mirrors RustcoreStats pattern) ───────────────────
@@ -667,9 +691,10 @@ local function UpdateHUD()
                     entry.frame.iconTex:SetTexture(itemTex or fallback)
                     entry.frame.sepiaTex:SetTexture(itemTex or fallback)
 
-                    -- Sepia snaps fully desaturated the instant the item enters the
-                    -- low-durability zone; rust is what ramps from there to 0.
-                    local sepiaAlpha = (pct <= threshold) and 1.0 or 0.0
+                    -- Sepia ramps in gradually as durability drops, capping at
+                    -- SEPIA_ALPHA_CAP once the low-durability threshold is hit;
+                    -- rust is what ramps the rest of the way from there to 0.
+                    local sepiaAlpha = GetSepiaAlpha(pct, threshold)
                     entry.frame.sepiaTex:SetVertexColor(SEPIA_R, SEPIA_G, SEPIA_B, sepiaAlpha)
 
                     -- Rusted wipe: 0 coverage at the threshold → full at 0%

@@ -386,7 +386,7 @@ local function Display(d)
     seenKeys[key] = now + 30
 
     local nameStr  = ClassColorCode(d.class) .. d.name .. "|r"
-    local lvlCl    = "(lvl " .. (d.level or "?") .. " " .. (d.class or "") .. ")"
+    local lvlCl    = "(lvl " .. (d.level or "?") .. ")"
     local srcStr   = (d.source ~= "" and d.source ~= "Unknown") and d.source or "unknown"
     local hasLoss  = d.count and d.count > 0
 
@@ -399,18 +399,15 @@ local function Display(d)
         line = line .. ", losing " .. countStr .. ", including: " .. itemStr
     end
 
-    if Rustcore.GetSetting("showDeathPopup") then
+    local minLevel = tonumber(Rustcore.GetSetting("deathlogMinLevel")) or 0
+    local meetsMinLevel = not d.level or d.level >= minLevel
+
+    if Rustcore.GetSetting("showDeathPopup") and meetsMinLevel then
         print(line)
     end
 
-    if Rustcore.GetSetting("showDeathWarning") then
-        local plain = d.name .. " just died to " .. srcStr .. " in " .. d.zone .. "."
-        if hasLoss then
-            local itemStr  = (d.link and d.link ~= "") and d.link or "an item"
-            local countStr = d.count .. (d.count == 1 and " item" or " items")
-            plain = d.name .. " just lost " .. countStr .. ", including: " .. itemStr .. "."
-        end
-        RaidNotice_AddMessage(RaidWarningFrame, plain, ChatTypeInfo["RAID_WARNING"])
+    if Rustcore.GetSetting("showDeathWarning") and meetsMinLevel and RustcoreDeathNotification and RustcoreDeathNotification.Show then
+        RustcoreDeathNotification.Show(d)
     end
 
     if RustcoreDeathlog and RustcoreDeathlog.AddEntry then RustcoreDeathlog.AddEntry(d) end

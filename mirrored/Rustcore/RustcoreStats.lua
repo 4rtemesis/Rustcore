@@ -666,6 +666,8 @@ local function BuildStatsFrame()
     f.shade = panelArt.shade
     f.resizeGrip = resizeGrip
     ApplySavedPosition(f)
+    statsFrame = f
+    RustcoreStats.RefreshLayout()
     RefreshText()
 
     f:Hide()

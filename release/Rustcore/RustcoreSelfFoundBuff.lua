@@ -33,10 +33,20 @@ local function ShowSelfFoundTooltip(owner)
     GameTooltip:AddLine(TOOLTIP_BODY, 1, 1, 1, true)
     GameTooltip:Show()
 end
--- Matches BuffButtonTemplate's native 30x30 size / 3px spacing.
+-- Matches BuffButtonTemplate's native 30x30 size; native spacing between
+-- icons reads slightly wider than the plain 3px button-template gap.
 local BUTTON_SIZE = 30
-local GAP = 3
+local GAP = 5
 local REFRESH_INTERVAL = 0.2
+
+-- Native buffs pulse (fade in/out) once they hit their last 30 seconds, and
+-- their duration text turns white once it's showing seconds instead of
+-- minutes/hours - matched here so our redrawn icons read the same way.
+local FLASH_THRESHOLD_SECONDS = 30
+local FLASH_MIN_ALPHA = 0.5
+local FLASH_PERIOD = 1
+local COLOR_DURATION_NORMAL = { 1, 0.82, 0 }
+local COLOR_DURATION_SECONDS = { 1, 1, 1 }
 
 -- Blizzard's own FrameXML anchors real slot 1 at BuffFrame's TOPRIGHT with
 -- a 0,0 offset, but this client's Edit Mode buff frame renders about half
@@ -49,10 +59,12 @@ local iconFrame
 local buttonPool = {}
 local active = false
 local sinceRefresh = 0
+local activeButtonCount = 0
 local RefreshAuraLayout -- forward-declared: OnUpdate (below) needs to call it before it's defined
 local HideNativeBuffFrame -- forward-declared: OnUpdate (below) needs to call it before it's defined
 local HideNativeTargetAurasForVerifiedTarget -- forward-declared: OnUpdate (below) needs to call it before it's defined
 local RefreshTargetIcon -- forward-declared: OnUpdate (below) needs to call it before it's defined
+local UpdateAuraFlash -- forward-declared: OnUpdate (below) needs to call it before it's defined
 
 local function EnsureIconFrame()
     if iconFrame then return iconFrame end
@@ -84,6 +96,7 @@ local function EnsureIconFrame()
     iconFrame:SetScript("OnUpdate", function(self, elapsed)
         HideNativeBuffFrame()
         HideNativeTargetAurasForVerifiedTarget()
+        pcall(UpdateAuraFlash)
         sinceRefresh = sinceRefresh + elapsed
         if sinceRefresh < REFRESH_INTERVAL then return end
         sinceRefresh = 0
@@ -110,6 +123,19 @@ local function CreateAuraButton()
     b.icon = b:CreateTexture(nil, "ARTWORK")
     b.icon:SetAllPoints(b)
 
+    -- Weapon-enchant (poison/oil/stone) icons get a purple border in the
+    -- native UI to set them apart from real buffs; we hide Blizzard's own
+    -- TempEnchant buttons so we have to draw that border ourselves. Rather
+    -- than fake it, this is Blizzard's own asset for exactly this purpose -
+    -- the native BuffButtonTempEnchant template (used by TempEnchant1/2)
+    -- overlays this same texture at 32x32 centered on a 30x30 button
+    -- (BuffFrame.xml), and the purple color is baked into the art itself.
+    b.border = b:CreateTexture(nil, "OVERLAY")
+    b.border:SetTexture("Interface\\Buttons\\UI-TempEnchant-Border")
+    b.border:SetSize(32, 32)
+    b.border:SetPoint("CENTER", b, "CENTER", 0, 0)
+    b.border:Hide()
+
     b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     b.count:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
 
@@ -118,7 +144,9 @@ local function CreateAuraButton()
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
-        if self.auraIndex and GameTooltip.SetUnitAura then
+        if self.weaponSlot then
+            GameTooltip:SetInventoryItem("player", self.weaponSlot)
+        elseif self.auraIndex and GameTooltip.SetUnitAura then
             GameTooltip:SetUnitAura("player", self.auraIndex, self.auraFilter)
         end
         GameTooltip:Show()
@@ -144,13 +172,15 @@ local function AcquireButton(i)
     return b
 end
 
+local DURATION_SECONDS_THRESHOLD = 60
+
 local function FormatDuration(seconds)
     if seconds >= 3600 then
-        return math.ceil(seconds / 3600) .. "h"
-    elseif seconds >= 60 then
-        return math.ceil(seconds / 60) .. "m"
+        return math.ceil(seconds / 3600) .. " h"
+    elseif seconds >= DURATION_SECONDS_THRESHOLD then
+        return math.ceil(seconds / 60) .. " m"
     else
-        return math.max(math.ceil(seconds), 0) .. "s"
+        return math.max(math.ceil(seconds), 0) .. " s"
     end
 end
 
@@ -174,16 +204,39 @@ end
 
 function HideNativeBuffFrame()
     local frame = _G.BuffFrame
-    if not frame then return end
-    frame:SetAlpha(0)
-    frame:EnableMouse(false)
+    if frame then
+        frame:SetAlpha(0)
+        frame:EnableMouse(false)
+    end
+
+    -- Weapon-enchant (poison/oil/stone) buffs aren't part of BuffFrame at
+    -- all in Classic/TBC FrameXML - there's no wrapping "TemporaryEnchantFrame"
+    -- container, just three standalone global buttons. Hiding BuffFrame alone
+    -- left these visible, showing Blizzard's own purple-bordered icon
+    -- underneath/beside ours.
+    for i = 1, 3 do
+        local enchantButton = _G["TempEnchant" .. i]
+        if enchantButton then
+            enchantButton:SetAlpha(0)
+            enchantButton:EnableMouse(false)
+        end
+    end
 end
 
 local function ShowNativeBuffFrame()
     local frame = _G.BuffFrame
-    if not frame then return end
-    frame:SetAlpha(1)
-    frame:EnableMouse(true)
+    if frame then
+        frame:SetAlpha(1)
+        frame:EnableMouse(true)
+    end
+
+    for i = 1, 3 do
+        local enchantButton = _G["TempEnchant" .. i]
+        if enchantButton then
+            enchantButton:SetAlpha(1)
+            enchantButton:EnableMouse(true)
+        end
+    end
 end
 
 function RefreshAuraLayout()
@@ -208,6 +261,8 @@ function RefreshAuraLayout()
         local b = AcquireButton(usedCount)
         b.auraIndex = auraIndex
         b.auraFilter = "HELPFUL"
+        b.weaponSlot = nil
+        b.border:Hide()
         b.icon:SetTexture(icon)
         b.count:SetText((count and count > 1) and tostring(count) or "")
         if duration and duration > 0 and expirationTime then
@@ -223,15 +278,73 @@ function RefreshAuraLayout()
         auraIndex = auraIndex + 1
     end
 
+    -- Temporary weapon enchants (poisons/oils/stones) aren't real auras -
+    -- UnitAura never returns them - so without this they silently vanish
+    -- from our redrawn bar even though Blizzard's native BuffFrame shows
+    -- them via its own separate TemporaryEnchantFrame code path.
+    local function AddWeaponEnchantSlot(hasEnchant, expirationMs, charges, invSlot)
+        if not hasEnchant then return end
+        usedCount = usedCount + 1
+        local b = AcquireButton(usedCount)
+        b.auraIndex = nil
+        b.auraFilter = nil
+        b.weaponSlot = invSlot
+        b.border:Show()
+        b.icon:SetTexture(GetInventoryItemTexture("player", invSlot))
+        b.count:SetText((charges and charges > 0) and tostring(charges) or "")
+        if expirationMs and expirationMs > 0 then
+            b.expirationTime = now + (expirationMs / 1000)
+        else
+            b.expirationTime = nil
+            b.duration:SetText("")
+        end
+        PositionSlot(b, slotIndex, perRow, baseX, baseY)
+        b:Show()
+
+        slotIndex = slotIndex + 1
+    end
+
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges, _mainHandEnchantID,
+          hasOffHandEnchant, offHandExpiration, offHandCharges = GetWeaponEnchantInfo()
+    AddWeaponEnchantSlot(hasMainHandEnchant, mainHandExpiration, mainHandCharges, INVSLOT_MAINHAND)
+    AddWeaponEnchantSlot(hasOffHandEnchant, offHandExpiration, offHandCharges, INVSLOT_OFFHAND)
+
     for i = 1, usedCount do
         local b = buttonPool[i]
         if b.expirationTime then
-            b.duration:SetText(FormatDuration(b.expirationTime - now))
+            local remaining = b.expirationTime - now
+            b.duration:SetText(FormatDuration(remaining))
+            local color = (remaining < DURATION_SECONDS_THRESHOLD) and COLOR_DURATION_SECONDS or COLOR_DURATION_NORMAL
+            b.duration:SetTextColor(color[1], color[2], color[3])
         end
     end
 
+    activeButtonCount = usedCount
+
     for i = usedCount + 1, #buttonPool do
+        buttonPool[i]:SetAlpha(1)
         buttonPool[i]:Hide()
+    end
+end
+
+-- Native buff icons pulse over their last 30 seconds; run every frame (not
+-- on the throttled refresh timer) so the fade reads smoothly instead of
+-- stepping in REFRESH_INTERVAL-sized jumps.
+function UpdateAuraFlash()
+    if not active or activeButtonCount == 0 then return end
+    local now = GetTime()
+    for i = 1, activeButtonCount do
+        local b = buttonPool[i]
+        if b and b:IsShown() and b.expirationTime then
+            local remaining = b.expirationTime - now
+            if remaining > 0 and remaining <= FLASH_THRESHOLD_SECONDS then
+                local phase = (now % FLASH_PERIOD) / FLASH_PERIOD
+                local wave = 0.5 - 0.5 * math.cos(phase * 2 * math.pi)
+                b:SetAlpha(1 - wave * (1 - FLASH_MIN_ALPHA))
+            else
+                b:SetAlpha(1)
+            end
+        end
     end
 end
 
@@ -252,8 +365,8 @@ local TARGET_GAP = 3
 local TARGET_ROW_WIDTH = 122 -- Blizzard's own max row width for these auras
 local TARGET_PER_ROW = math.max(math.floor((TARGET_ROW_WIDTH + TARGET_GAP) / (TARGET_BUTTON_SIZE + TARGET_GAP)), 1)
 local TARGET_START_X = 21
-local TARGET_BOTTOM_START_Y = 27
-local TARGET_TOP_START_Y = -15
+local TARGET_BOTTOM_START_Y = 28
+local TARGET_TOP_START_Y = -14
 
 local targetIcon
 local targetButtonPool = {}
@@ -444,7 +557,8 @@ function RustcoreSelfFoundBuff.Refresh()
     EnsureIconFrame()
 
     local state = Rustcore.GetSelfFoundIconState and Rustcore.GetSelfFoundIconState()
-    active = state == "verified"
+    local buffEnabled = Rustcore.GetSetting("selfFoundBuffEnabled") ~= false
+    active = state == "verified" and buffEnabled
 
     if active then
         iconFrame.texture:SetTexture(Rustcore.GetSelfFoundIconTexture())

@@ -50,12 +50,14 @@ local defaults = {
     allowRepair     = false, -- if false (default), repair is blocked
     keepMainWeapon  = false, -- spare main weapon slot from deletion
     ignoreDeathAfterEnemyPlayerDamage = false, -- skip deletion if a hostile player damaged you during the fight
+    selfFoundBuffEnabled = true, -- show verified Self-Found status as a buff icon on the player's own buff bar
     showMinimapButton = true, -- show the minimap launcher button
     broadcastDeaths = true,  -- broadcast death to Rustcore channel
     broadcastDeathsRealmWide = true, -- also broadcast via the shared realm-wide channel, not just guild/group
     guildDeathMessage = true, -- send a guild chat message after the death animation
     showDeathPopup  = true,  -- show popup notification for other players' deaths
     showDeathWarning= true, -- show center-screen warning for other players' deaths
+    showDeathWarningSound = true, -- play MetalDrum.wav when the center-screen warning shows
     showStatsWindow = false, -- show the always-on-screen item loss stats window
     showDurabilityHUD = true,    -- show custom per-slot durability HUD (replaces native frame)
     showAllDurability = false,   -- show all equipped slots regardless of durability level
@@ -328,6 +330,9 @@ function Rustcore.SetSetting(key, value)
         if value then
             MarkSelfFoundEnabled()
         end
+        RefreshSelfFoundStatsIcon()
+    end
+    if key == "selfFoundBuffEnabled" then
         RefreshSelfFoundStatsIcon()
     end
     if key == "showMinimapButton" then

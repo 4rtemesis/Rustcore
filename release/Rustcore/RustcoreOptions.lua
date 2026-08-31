@@ -39,8 +39,27 @@ local function ApplyDifficultyLabelStyle(slider, value)
 
     local v = math.max(1, math.min(5, math.floor((value or 1) + 0.5)))
     local color = DIFF_COLORS[v] or DIFF_COLORS[1]
+    label:SetWidth(220)
     label:SetText(DIFF_LABELS[v])
     label:SetFont(RUSTED_FONT_PATH, 34, "")
+    label:SetTextColor(color[1], color[2], color[3])
+    label:SetShadowColor(0, 0, 0, 1)
+    label:SetShadowOffset(2, -2)
+end
+
+-- Takes over the difficulty title slot (normally "Rusted"/"Broken"/etc, styled
+-- via ApplyDifficultyLabelStyle) while settings are locked, instead of showing
+-- a separate combat-lock note elsewhere on the panel. Sized up and outlined
+-- so it reads clearly in that larger title slot instead of looking muted.
+local function ApplyCombatLockLabelStyle(slider, value)
+    local label = slider and slider.GetName and _G[slider:GetName().."Text"]
+    if not label then return end
+
+    local v = math.max(1, math.min(5, math.floor((value or 1) + 0.5)))
+    local color = DIFF_COLORS[v] or DIFF_COLORS[1]
+    label:SetWidth(340)
+    label:SetText(COMBAT_NOTE_TEXT)
+    label:SetFont(BODY_FONT_PATH, 24, "OUTLINE")
     label:SetTextColor(color[1], color[2], color[3])
     label:SetShadowColor(0, 0, 0, 1)
     label:SetShadowOffset(2, -2)
@@ -121,7 +140,7 @@ local function MakeCheckbox(parent, labelText, tooltipText, anchorTo, yOff, sett
     return cb
 end
 
-local function MakeSettingSlider(parent, name, labelText, y, minValue, maxValue, step, settingKey, formatter)
+local function MakeSettingSlider(parent, name, labelText, y, minValue, maxValue, step, settingKey, formatter, tooltipText)
     local slider = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", parent, "TOPLEFT", 28, y)
     slider:SetWidth(180)
@@ -145,6 +164,15 @@ local function MakeSettingSlider(parent, name, labelText, y, minValue, maxValue,
         ApplyBodyFont(valueText, 14)
     end
 
+    if tooltipText then
+        slider:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(tooltipText, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        slider:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
     slider:SetScript("OnValueChanged", function(self, value)
         local normalized
         if step >= 1 then
@@ -163,6 +191,49 @@ local function MakeSettingSlider(parent, name, labelText, y, minValue, maxValue,
     end)
     slider:SetValue(Rustcore.GetSetting(settingKey))
     return slider
+end
+
+-- Inset sub-toggles that only matter while their parent checkbox's setting
+-- is on; dims/disables them to match, independent of (and layered underneath)
+-- the combat-lock state.
+local DEPENDENT_TOGGLES = {
+    { parentKey = "selfFound",          field = "cbSelfFoundBuff" },
+    { parentKey = "showDurabilityHUD",  field = "cbDurShowAll" },
+    { parentKey = "showDurabilityHUD",  field = "cbDurGrowUpward" },
+    { parentKey = "showDurabilityHUD",  field = "cbDurReverseOrder" },
+    { parentKey = "showStatsWindow",    field = "cbStatsHorizontal" },
+    { parentKey = "broadcastDeaths",    field = "cbGuildMessage" },
+    { parentKey = "broadcastDeaths",    field = "cbRealmBroadcast" },
+    { parentKey = "showDeathWarning",   field = "cbShowWarningSound" },
+    { parentKey = "showDeathlogWindow", field = "cbDeathlogLevel" },
+    { parentKey = "showDeathlogWindow", field = "cbDeathlogSource" },
+    { parentKey = "showDeathlogWindow", field = "cbDeathlogCount" },
+    { parentKey = "showDeathlogWindow", field = "cbDeathlogItem" },
+}
+
+local DEPENDENT_PARENT_KEYS = {
+    "selfFound", "showDurabilityHUD", "showStatsWindow",
+    "broadcastDeaths", "showDeathWarning", "showDeathlogWindow",
+}
+
+local function DependentParentsSignature()
+    local parts = {}
+    for i, key in ipairs(DEPENDENT_PARENT_KEYS) do
+        parts[i] = Rustcore.GetSetting(key) and "1" or "0"
+    end
+    return table.concat(parts)
+end
+
+local function RefreshDependentToggles(frame)
+    local locked = SettingsLocked()
+    for _, dep in ipairs(DEPENDENT_TOGGLES) do
+        local cb = frame[dep.field]
+        if cb then
+            local usable = Rustcore.GetSetting(dep.parentKey) and not locked
+            if usable then cb:Enable() else cb:Disable() end
+            cb:SetAlpha(usable and 1 or 0.5)
+        end
+    end
 end
 
 local function RefreshCombatLockState(frame)
@@ -192,6 +263,7 @@ local function RefreshCombatLockState(frame)
 
     local controls = {
         frame.cbSelfFound,
+        frame.cbSelfFoundBuff,
         frame.cbWeapon,
         frame.cbRepair,
         frame.cbPvpDeathProtection,
@@ -201,6 +273,7 @@ local function RefreshCombatLockState(frame)
         frame.cbRealmBroadcast,
         frame.cbShowPopup,
         frame.cbShowWarning,
+        frame.cbShowWarningSound,
         frame.cbStats,
         frame.cbDeathlog,
         frame.cbDeathlogLevel,
@@ -212,6 +285,8 @@ local function RefreshCombatLockState(frame)
         frame.cbDurGrowUpward,
         frame.cbDurReverseOrder,
         frame.cbStatsHorizontal,
+        frame.cbDragonPlayerFrame,
+        frame.cbDragonTargetFrame,
         frame.importBtn,
     }
     for _, control in ipairs(controls) do
@@ -231,9 +306,15 @@ local function RefreshCombatLockState(frame)
     if frame.titleText then
         frame.titleText:SetText(DEFAULT_TITLE_TEXT)
     end
-    if frame.combatNote then
-        if locked then frame.combatNote:Show() else frame.combatNote:Hide() end
+    if frame.diffSlider then
+        if locked then
+            ApplyCombatLockLabelStyle(frame.diffSlider, Rustcore.GetSetting("difficulty"))
+        else
+            ApplyDifficultyLabelStyle(frame.diffSlider, Rustcore.GetSetting("difficulty"))
+        end
     end
+
+    RefreshDependentToggles(frame)
 end
 
 -- ── Frame construction ────────────────────────────────────────────────────────
@@ -342,15 +423,6 @@ local function BuildOptionsFrame()
     diffDesc:SetText(DIFF_DESCS[Rustcore.GetSetting("difficulty")])
     ApplyBodyFont(diffDesc, 14)
 
-    local combatNote = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    combatNote:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -32)
-    combatNote:SetWidth(160)
-    combatNote:SetJustifyH("RIGHT")
-    combatNote:SetTextColor(1, 0.35, 0.25)
-    combatNote:SetText(COMBAT_NOTE_TEXT)
-    ApplyBodyFont(combatNote, 13)
-    combatNote:Hide()
-    f.combatNote = combatNote
 
     slider:SetScript("OnValueChanged", function(self, value)
         ApplyDifficultyValue(self, diffDesc, value)
@@ -496,10 +568,15 @@ local function BuildOptionsFrame()
         "Blocks access to the mailbox, auction house, and player trading.",
         rulesHeader, -6, "selfFound")
 
+    local cbSelfFoundBuff = MakeCheckbox(gameplayPage,
+        "Show Buff Icon",
+        "Shows verified Self-Found status as a buff icon on your buff bar. Disable to leave your buff bar untouched.",
+        cbSelfFound, -3, "selfFoundBuffEnabled", 34, 20, 14)
+
     local cbPvpDeathProtection = MakeCheckbox(gameplayPage,
         "Ignore PVP Death",
         "If an enemy player damages you at any point during a combat, dying in the same combat will not mark any items for deletion.",
-        cbSelfFound, -4, "ignoreDeathAfterEnemyPlayerDamage")
+        cbSelfFoundBuff, -4, "ignoreDeathAfterEnemyPlayerDamage", -34)
 
     local cbWeapon = MakeCheckbox(gameplayPage,
         "Keep Main Weapon",
@@ -514,8 +591,8 @@ local function BuildOptionsFrame()
         "Allows repair at merchants. By default repair is always blocked.",
         cbWeapon, -4, "allowRepair")
 
-    MakeRule(gameplayPage, -190)
-    local profileHeader = MakeHeader(gameplayPage, "Character Profile", -210)
+    MakeRule(gameplayPage, -205)
+    local profileHeader = MakeHeader(gameplayPage, "Character Profile", -225)
 
     local profileDesc = gameplayPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     profileDesc:SetPoint("TOPLEFT", profileHeader, "BOTTOMLEFT", 0, -6)
@@ -572,7 +649,30 @@ local function BuildOptionsFrame()
         cbDragonPlayerFrame, -7, "dragonTargetFrame")
 
     -- Notifications
-    local bcHeader = MakeHeader(notificationsContent, "Broadcast", -20)
+    local deathlogHeader = MakeHeader(notificationsContent, "Death Log", -20)
+    local cbDeathlog = MakeCheckbox(notificationsContent,
+        "Show Death Log",
+        "Show or hide the Rustcore death log window listing other players' deaths.",
+        deathlogHeader, -6, "showDeathlogWindow")
+
+    local cbDeathlogLevel = MakeCheckbox(notificationsContent,
+        "Show Level", "Show the victim's level in each death log entry.",
+        cbDeathlog, -3, "showDeathlogLevel", 34, 20, 14)
+
+    local cbDeathlogSource = MakeCheckbox(notificationsContent,
+        "Show Death Source", "Show what killed the player.",
+        cbDeathlogLevel, -3, "showDeathlogSource", 0, 20, 14)
+
+    local cbDeathlogCount = MakeCheckbox(notificationsContent,
+        "Show Items", "Show the number of items lost in each death log entry.",
+        cbDeathlogSource, -3, "showDeathlogCount", 0, 20, 14)
+
+    local cbDeathlogItem = MakeCheckbox(notificationsContent,
+        "Show Lost Item", "Show an icon (with tooltip) for the most valuable item lost.",
+        cbDeathlogCount, -3, "showDeathlogItem", 0, 20, 14)
+
+    MakeRule(notificationsContent, -195)
+    local bcHeader = MakeHeader(notificationsContent, "Broadcast", -215)
     local cbBroadcast = MakeCheckbox(notificationsContent,
         "Broadcast My Death",
         "Announces your death and the item you lost to other Rustcore users.",
@@ -598,35 +698,18 @@ local function BuildOptionsFrame()
         "Display a center-screen raid warning when another Rustcore player dies.",
         cbShowPopup, -4, "showDeathWarning")
 
-    MakeRule(notificationsContent, -195)
-    local deathlogHeader = MakeHeader(notificationsContent, "Death Log", -215)
-    local cbDeathlog = MakeCheckbox(notificationsContent,
-        "Show Death Log",
-        "Show or hide the Rustcore death log window listing other players' deaths.",
-        deathlogHeader, -6, "showDeathlogWindow")
-
-    local cbDeathlogLevel = MakeCheckbox(notificationsContent,
-        "Show Level", "Show the victim's level in each death log entry.",
-        cbDeathlog, -3, "showDeathlogLevel", 34, 20, 14)
-
-    local cbDeathlogSource = MakeCheckbox(notificationsContent,
-        "Show Death Source", "Show what killed the player.",
-        cbDeathlogLevel, -3, "showDeathlogSource", 0, 20, 14)
-
-    local cbDeathlogCount = MakeCheckbox(notificationsContent,
-        "Show Items", "Show the number of items lost in each death log entry.",
-        cbDeathlogSource, -3, "showDeathlogCount", 0, 20, 14)
-
-    local cbDeathlogItem = MakeCheckbox(notificationsContent,
-        "Show Lost Item", "Show an icon (with tooltip) for the most valuable item lost.",
-        cbDeathlogCount, -3, "showDeathlogItem", 0, 20, 14)
+    local cbShowWarningSound = MakeCheckbox(notificationsContent,
+        "Play Death Sound",
+        "Play a sound when the center-screen death warning shows.",
+        cbShowWarning, -4, "showDeathWarningSound", 34, 20, 14)
 
     local minLevelSlider = MakeSettingSlider(
         notificationsContent,
         "RustcoreDeathlogMinLevelSlider",
         "Minimum Level",
-        -400, 0, 60, 1, "deathlogMinLevel",
-        function(value) return value == 0 and "Off" or tostring(value) end
+        -445, 0, 60, 1, "deathlogMinLevel",
+        function(value) return value == 0 and "Off" or tostring(value) end,
+        "Hides death messages, the center-screen warning, and the death log entry itself for players below this level. Set to Off to show all levels."
     )
 
     -- Appearance
@@ -645,27 +728,27 @@ local function BuildOptionsFrame()
         -130, 0, 1, 0.01, "statsBackgroundShadow",
         PercentFormatter
     )
-    MakeRule(appearanceContent, -170)
-    MakeHeader(appearanceContent, "Death Log", -190)
+    MakeRule(appearanceContent, -185)
+    MakeHeader(appearanceContent, "Death Log", -205)
     local deathlogOpacitySlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogOpacitySlider",
         "Background Opacity",
-        -235, 0, 1, 0.01, "deathlogBackgroundOpacity",
+        -250, 0, 1, 0.01, "deathlogBackgroundOpacity",
         PercentFormatter
     )
     local deathlogShadowSlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogShadowSlider",
         "Dark Overlay",
-        -300, 0, 1, 0.01, "deathlogBackgroundShadow",
+        -315, 0, 1, 0.01, "deathlogBackgroundShadow",
         PercentFormatter
     )
     local deathlogFontSlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogFontSlider",
         "Font Size",
-        -365, 9, 16, 1, "deathlogFontSize",
+        -380, 9, 16, 1, "deathlogFontSize",
         function(value) return tostring(value) end
     )
 
@@ -889,6 +972,7 @@ local function BuildOptionsFrame()
 
     -- Store refs for Refresh
     f.cbSelfFound   = cbSelfFound
+    f.cbSelfFoundBuff = cbSelfFoundBuff
     f.cbWeapon      = cbWeapon
     f.cbRepair      = cbRepair
     f.cbPvpDeathProtection = cbPvpDeathProtection
@@ -898,6 +982,7 @@ local function BuildOptionsFrame()
     f.cbRealmBroadcast = cbRealmBroadcast
     f.cbShowPopup   = cbShowPopup
     f.cbShowWarning = cbShowWarning
+    f.cbShowWarningSound = cbShowWarningSound
     f.cbStats       = cbStats
     f.cbDeathlog = cbDeathlog
     f.cbDeathlogLevel = cbDeathlogLevel
@@ -929,6 +1014,7 @@ local function BuildOptionsFrame()
         ApplyDifficultyLabelStyle(self.diffSlider, v)
         self.diffDesc:SetText(DIFF_DESCS[v])
         self.cbSelfFound:Refresh()
+        self.cbSelfFoundBuff:Refresh()
         self.cbWeapon:Refresh()
         self.cbRepair:Refresh()
         self.cbPvpDeathProtection:Refresh()
@@ -938,6 +1024,7 @@ local function BuildOptionsFrame()
         self.cbRealmBroadcast:Refresh()
         self.cbShowPopup:Refresh()
         self.cbShowWarning:Refresh()
+        self.cbShowWarningSound:Refresh()
         self.cbStats:Refresh()
         self.cbDeathlog:Refresh()
         self.cbDeathlogLevel:Refresh()
@@ -969,6 +1056,9 @@ local function BuildOptionsFrame()
         if self._combatLocked ~= SettingsLocked() then
             self._combatLocked = SettingsLocked()
             RefreshCombatLockState(self)
+        elseif self._depSignature ~= DependentParentsSignature() then
+            self._depSignature = DependentParentsSignature()
+            RefreshDependentToggles(self)
         end
     end)
 

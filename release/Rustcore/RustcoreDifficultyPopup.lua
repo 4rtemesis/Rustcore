@@ -221,7 +221,7 @@ local function BuildFrame()
     -- Fake shadow (see BuildSpacedHeader note): black copy offset behind
     -- the real text, since native shadowing doesn't render here.
     local titleShadow = frame:CreateFontString(nil, "OVERLAY")
-    titleShadow:SetPoint("TOP", frame, "TOP", 1, -27)
+    titleShadow:SetPoint("TOP", frame, "TOP", 1, -41)
     titleShadow:SetFont(BODY_FONT_PATH, 26, "")
     titleShadow:SetTextColor(0, 0, 0, 0.75)
     titleShadow:SetJustifyH("CENTER")
@@ -230,7 +230,7 @@ local function BuildFrame()
     titleShadow:SetText("RUSTCORE")
 
     local title = frame:CreateFontString(nil, "OVERLAY")
-    title:SetPoint("TOP", frame, "TOP", 0, -26)
+    title:SetPoint("TOP", frame, "TOP", 0, -40)
     title:SetFont(BODY_FONT_PATH, 26, "")
     title:SetTextColor(1, 1, 1)
     title:SetJustifyH("CENTER")
@@ -315,7 +315,7 @@ local function BuildFrame()
 
     local selectBtn = CreateFrame("Button", "RustcoreDifficultySelectButton", frame)
     selectBtn:SetSize(150, 56)
-    selectBtn:SetPoint("TOP", panelRow, "BOTTOM", 0, -12)
+    selectBtn:SetPoint("TOP", panelRow, "BOTTOM", 0, -24)
     RustcoreTheme.SkinDeleteButton(selectBtn)
     -- Built directly here (same font/size/spacing/shadow as the DELETE
     -- button's own LayoutDeleteButtonLetters) instead of going through

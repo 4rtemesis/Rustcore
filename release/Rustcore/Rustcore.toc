@@ -1,4 +1,4 @@
-## Interface: 20505
+## Interface: 11509, 20506
 ## Title: Rustcore
 ## Notes: Disabled repair and deletes items on death.
 ## Author: Rustcore
@@ -14,6 +14,7 @@ RustcoreDragon.lua
 RustcoreTheme.lua
 RustcoreStats.lua
 RustcoreDeathlog.lua
+RustcoreDeathNotification.lua
 RustcoreDurability.lua
 RustcoreOptions.lua
 # Auto-show-on-login disabled in Rustcore.lua (2026-07-28); test with /rcpopup

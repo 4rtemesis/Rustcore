@@ -37,7 +37,7 @@ local NATIVE_TEXTURE_TARGET = "TargetFrameTextureFrameTexture"
 -- This sits between the native-sized attempt and the earlier 280-wide art.
 local DRAGON_WIDTH = 256
 local DRAGON_HEIGHT = 128
-local PLAYER_X_OFFSET = -5
+local PLAYER_X_OFFSET = -6
 local TARGET_X_OFFSET = -13
 local PLAYER_Y_OFFSET = -18
 local TARGET_Y_OFFSET = -14
@@ -47,6 +47,17 @@ local TARGET_Y_OFFSET = -14
 -- is raised above the dragon; if none exist this is a silent no-op.
 local LEVEL_TEXT_CANDIDATES_PLAYER = { "PlayerLevelText" }
 local LEVEL_TEXT_CANDIDATES_TARGET = { "TargetFrameTextureFrameLevelText", "TargetLevelText", "TargetFrameLevelText" }
+
+-- Combat ("2 swords") and resting ("zzz") icons that Blizzard swaps in over
+-- PlayerLevelText via PlayerFrame_UpdateStatus - these are separate texture
+-- regions on PlayerFrame itself, not part of PlayerLevelText, so they need
+-- their own raise or they stay hidden behind the dragon art. Only the glyph
+-- textures are raised, not the *Glow/*Background flourishes - those are
+-- large additive overlays sized for the native portrait and washed out the
+-- dragon art when forced in front of it.
+local STATUS_ICON_CANDIDATES_PLAYER = {
+    "PlayerStatusTexture", "PlayerRestIcon", "PlayerAttackIcon",
+}
 local VALUE_TEXT_CANDIDATES_PLAYER = { "PlayerFrameHealthBarText", "PlayerFrameManaBarText" }
 local VALUE_TEXT_CANDIDATES_TARGET = {
     "TargetFrameTextureFrameHealthBarText",
@@ -138,6 +149,16 @@ local function RaiseHitText(candidates, parent, holder)
     Raise(parent.hitIndicator)
 end
 
+local function RaiseStatusIcons(candidates, iconHolder)
+    for _, name in ipairs(candidates) do
+        local region = _G[name]
+        if region then
+            region:SetParent(iconHolder)
+            region:SetDrawLayer("OVERLAY")
+        end
+    end
+end
+
 -- Center on the corresponding native art to retain Blizzard's positioning,
 -- while using the shared footprint above instead of inheriting the two
 -- native texture regions' mismatched sizes.
@@ -160,6 +181,17 @@ local function EnsurePlayerDragon()
     RaiseLevelText(LEVEL_TEXT_CANDIDATES_PLAYER, holder)
     playerValueTexts = RaiseValueTexts(VALUE_TEXT_CANDIDATES_PLAYER, VALUE_BAR_CANDIDATES_PLAYER, holder)
     RaiseHitText(HIT_TEXT_CANDIDATES_PLAYER, parent, holder)
+
+    -- The status icons must draw above PlayerLevelText (a FontString), which
+    -- always wins same-layer draw order against textures regardless of
+    -- sublevel - HIGHLIGHT would beat it but only paints on actual mouseover,
+    -- so instead give the icons their own frame one level above holder and
+    -- let cross-frame level ordering (which beats any same-frame layer rule)
+    -- put them on top unconditionally.
+    local iconHolder = CreateFrame("Frame", "RustcoreDragonPlayerStatusIconHolder", holder)
+    iconHolder:SetAllPoints(holder)
+    iconHolder:SetFrameLevel(holder:GetFrameLevel() + 1)
+    RaiseStatusIcons(STATUS_ICON_CANDIDATES_PLAYER, iconHolder)
 
     playerDragon = tex
     return playerDragon
