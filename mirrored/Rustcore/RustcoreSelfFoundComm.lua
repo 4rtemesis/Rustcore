@@ -120,7 +120,17 @@ local function HandleQuery(name, sender)
     local myName = NormalizeName(UnitName("player"))
     if name ~= myName then return end
     local isVerified = Rustcore.GetSelfFoundIconState and Rustcore.GetSelfFoundIconState() == "verified"
-    local difficulty = (Rustcore.GetSetting and Rustcore.GetSetting("difficulty")) or 1
+    -- Plan section 46: peers are told the verified tier, never the raw
+    -- setting, so a dragon another player sees always means something. 0 is
+    -- outside the 1-5 range the receiver accepts, so an uncertified character
+    -- simply shows no dragon on older clients as well as new ones.
+    local V = RustcoreVerification
+    local difficulty
+    if V and V.Difficulty and V.Difficulty.GetBroadcastTier then
+        difficulty = V.Difficulty.GetBroadcastTier() or 0
+    else
+        difficulty = (Rustcore.GetSetting and Rustcore.GetSetting("difficulty")) or 1
+    end
     SendMessage(table.concat({ "R", myName, isVerified and "1" or "0", tostring(difficulty) }, DELIM), sender)
 end
 

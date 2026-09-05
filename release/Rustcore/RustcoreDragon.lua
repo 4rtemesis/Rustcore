@@ -232,6 +232,19 @@ local function SetNativeTextureHidden(globalName, hidden)
     end
 end
 
+-- Plan sections 7 and 15: the local player's dragon is the hardest difficulty
+-- Rustcore can still vouch for, never simply the option that is selected.
+-- Verification returns nil when no dragon may be claimed at all. If the
+-- verification module is missing entirely the selected preset is used, because
+-- blanking a portrait over a load failure is the wrong way to be wrong.
+local function LocalDragonTier()
+    local V = RustcoreVerification
+    if V and V.Difficulty and V.Difficulty.GetPortraitTier then
+        return V.Difficulty.GetPortraitTier()
+    end
+    return Rustcore.GetSetting("difficulty") or 1
+end
+
 function RustcoreDragon.RefreshPlayerFrame()
     local tex = EnsurePlayerDragon()
     if not tex then return end
@@ -244,7 +257,15 @@ function RustcoreDragon.RefreshPlayerFrame()
         return
     end
 
-    local difficulty = Rustcore.GetSetting("difficulty") or 1
+    local difficulty = LocalDragonTier()
+    if not difficulty then
+        tex:Hide()
+        playerDragonShown = false
+        SetNativeTextureHidden(NATIVE_TEXTURE_PLAYER, false)
+        SetValueTextsVisible(playerValueTexts, false)
+        return
+    end
+
     tex:SetTexture(Rustcore.GetAssetPath("UI/" .. (DRAGON_TEXTURES[difficulty] or DRAGON_TEXTURES[1])))
     tex:Show()
     playerDragonShown = true
@@ -259,7 +280,7 @@ function RustcoreDragon.RefreshTargetFrame()
     local difficulty
     if Rustcore.GetSetting("dragonTargetFrame") and UnitExists("target") and UnitIsPlayer("target") then
         if UnitIsUnit("target", "player") then
-            difficulty = Rustcore.GetSetting("difficulty")
+            difficulty = LocalDragonTier()
         elseif RustcoreSelfFoundComm and RustcoreSelfFoundComm.GetKnownDifficulty then
             difficulty = RustcoreSelfFoundComm.GetKnownDifficulty(UnitName("target"))
         end

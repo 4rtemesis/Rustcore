@@ -330,10 +330,21 @@ function Rustcore.SetSetting(key, value)
         if value then
             MarkSelfFoundEnabled()
         end
+        if RustcoreVerification and RustcoreVerification.SelfFound then
+            -- Plan section 6: the claim and its baseline start the moment
+            -- Self-Found is switched on, not at the next login.
+            RustcoreVerification.SelfFound.OnSettingChanged(value and true or false)
+        end
         RefreshSelfFoundStatsIcon()
     end
     if key == "selfFoundBuffEnabled" then
         RefreshSelfFoundStatsIcon()
+    end
+    if key == "difficulty" and RustcoreVerification and RustcoreVerification.Difficulty then
+        -- Plan section 8: a difficulty change is recorded, never a
+        -- certification change. Kept out of the refresh chain below so it
+        -- cannot depend on which optional UI modules happen to be loaded.
+        RustcoreVerification.Difficulty.SyncSelectedTier()
     end
     if key == "showMinimapButton" then
         ApplyMinimapButtonVisibility()
@@ -456,9 +467,21 @@ end
 
 -- ── Combat snapshot ───────────────────────────────────────────────────────────
 
+-- True when the last snapshot actually withheld an equipped item because of
+-- the main-weapon exception. Verification needs to know whether the exception
+-- changed anything, not merely whether it was switched on.
+local snapshotWeaponSkipped = false
+
 local function TakeSnapshot()
     wipe(combatSnapshot)
     local skipSlot = Rustcore.GetSetting("keepMainWeapon") and GetMainWeaponSlot() or nil
+    snapshotWeaponSkipped = false
+    if skipSlot and GetInventoryItemLink("player", skipSlot) then
+        -- A broken item is ineligible anyway, so shielding it changed nothing.
+        local durCurrent, durMax = GetInventoryItemDurability(skipSlot)
+        local isBroken = durCurrent ~= nil and durMax ~= nil and durMax > 0 and durCurrent == 0
+        snapshotWeaponSkipped = not isBroken
+    end
     for _, slotId in ipairs(GEAR_SLOTS) do
         if slotId ~= skipSlot then
             local link = GetInventoryItemLink("player", slotId)
@@ -589,6 +612,22 @@ function Rustcore.FlushPendingGuildDeathMessage()
     pendingGuildDeathMessage = nil
 end
 
+-- Certification follows the rules that actually governed the death, so
+-- verification is told what happened rather than what the options say
+-- (plan section 9). Wrapped so a verification fault can never break a death.
+local function NotifyVerificationDeath(penaltyApplied, markedCount)
+    if not (RustcoreVerification and RustcoreVerification.Difficulty) then return end
+    local ok, err = pcall(RustcoreVerification.Difficulty.OnDeath, {
+        tier = Rustcore.GetSetting("difficulty"),
+        penaltyApplied = penaltyApplied,
+        mainWeaponSkipped = penaltyApplied and snapshotWeaponSkipped or false,
+        markedCount = markedCount or 0,
+    })
+    if not ok then
+        print("|cffff4444Rustcore ERROR:|r verification death hook: " .. tostring(err))
+    end
+end
+
 local function OnPlayerDead()
     local ok, err = pcall(function()
         if Rustcore.GetSetting("ignoreDeathAfterEnemyPlayerDamage") and tookEnemyPlayerDamageThisCombat then
@@ -596,6 +635,7 @@ local function OnPlayerDead()
             pendingGuildDeathMessage = nil
             wipe(markedItems)
             RustcoreBroadcast.Announce(markedItems, lastDeathSource)
+            NotifyVerificationDeath(false, 0)
             print("|cffff4444Rustcore:|r Death penalty skipped because you took damage from an enemy player during that combat.")
             return
         end
@@ -607,6 +647,7 @@ local function OnPlayerDead()
         end
 
         BuildMarkedItems(source)
+        NotifyVerificationDeath(true, #markedItems)
 
         -- Always announce the death itself (deathlog entry + channel broadcast),
         -- even when nothing was lost (Lite mode, or no eligible items in the
@@ -843,6 +884,13 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         if (...) == "Rustcore" then
             Rustcore.assetFolder = (...)
+            -- Must run before InitSettings and before any other module
+            -- creates per-character tables: verification tells a returning
+            -- Rustcore character from a new one by reading RustcoreDB while
+            -- it is still exactly as the last session left it.
+            if RustcoreVerification and RustcoreVerification.CaptureLegacyEvidence then
+                RustcoreVerification.CaptureLegacyEvidence()
+            end
             InitSettings()
             EnsureSelfFoundProfile()
             MarkSelfFoundEnabled()
@@ -855,6 +903,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
             if RustcoreDeathlog and RustcoreDeathlog.Init then
                 RustcoreDeathlog.Init()
+            end
+            if RustcoreVerification and RustcoreVerification.Init then
+                RustcoreVerification.Init()
             end
             CreateMinimapButton()
             print("|cffff4444Rustcore|r loaded. |cffffd700/rustcore|r for options.")

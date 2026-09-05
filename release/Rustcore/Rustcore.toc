@@ -7,6 +7,14 @@
 ## SavedVariables: RustcoreDB
 
 Rustcore.lua
+# Verification system (certification tracks, integrity chain, playtime)
+Verification\Core.lua
+Verification\Integrity.lua
+Verification\Time.lua
+Verification\Migration.lua
+Verification\Difficulty.lua
+Verification\SelfFound.lua
+Verification\Durability.lua
 RustcoreBroadcast.lua
 RustcoreSelfFoundBuff.lua
 RustcoreSelfFoundComm.lua
