@@ -204,15 +204,28 @@ local function MarkSelfFoundEnabled()
     end
 end
 
+-- The single gate for the Self-Found buff (RustcoreSelfFoundBuff) and for the
+-- one bit peers are told about (RustcoreSelfFoundComm). Plan section 28: the
+-- buff shows during VERIFIED and WARNING and is hidden during UNCERTAIN,
+-- UNVERIFIED and FAILED; section 46: peers learn the flag and nothing else.
 function Rustcore.GetSelfFoundIconState()
     local profile = EnsureSelfFoundProfile()
     if not profile.hasEnabledSelfFound or profile.externalItemReceived then
         return nil
     end
-    if Rustcore.GetSetting("selfFound") then
-        return "verified"
+    if not Rustcore.GetSetting("selfFound") then
+        return "warning"
     end
-    return "warning"
+
+    -- Verification has the final say once it has a record for this character.
+    -- Absence of a record is not treated as a failure: it means verification is
+    -- unavailable (an older save, or the module failed to load), and blanking a
+    -- buff the player already had would be the wrong way to be wrong.
+    local V = RustcoreVerification
+    if V and V.GetTrack and V.GetTrack("selfFound") then
+        return V.IsSelfFoundCertified() and "verified" or nil
+    end
+    return "verified"
 end
 
 -- Spell 431567 "Self-Found Adventurer" is Blizzard's real Hardcore
@@ -872,7 +885,7 @@ eventFrame:RegisterEvent("PLAYER_UNGHOST")
 eventFrame:RegisterEvent("UI_SCALE_CHANGED")
 eventFrame:RegisterEvent("MAIL_SHOW")
 eventFrame:RegisterEvent("MAIL_CLOSED")
-eventFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
+-- AUCTION_HOUSE_SHOW is handled in Verification/SelfFoundRestrict.lua.
 eventFrame:RegisterEvent("TRADE_SHOW")
 eventFrame:RegisterEvent("TRADE_CLOSED")
 eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
@@ -963,27 +976,22 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         UpdateMinimapButtonPosition()
 
     elseif event == "MAIL_SHOW" then
-        if Rustcore.GetSetting("selfFound") then
-            C_Timer.After(0, function() HideUIPanel(MailFrame) end)
-            print("|cffff4444Rustcore:|r Mailbox blocked (Self-Found mode).")
-        else
+        if not Rustcore.GetSetting("selfFound") then
+            -- Self-Found off: nothing to block, but the legacy icon state still
+            -- tracks whether this character ever took items from another player.
             BeginSelfFoundSource("mail")
         end
+        -- Self-Found on: the mailbox deliberately stays open. NPC and quest mail
+        -- has to keep working, so Verification/Mail.lua locks the forbidden mail
+        -- individually instead of hiding the whole frame.
 
     elseif event == "MAIL_CLOSED" then
         EndSelfFoundSource("mail")
 
-    elseif event == "AUCTION_HOUSE_SHOW" then
-        if Rustcore.GetSetting("selfFound") then
-            C_Timer.After(0, function() HideUIPanel(AuctionFrame) end)
-            print("|cffff4444Rustcore:|r Auction House blocked (Self-Found mode).")
-        end
-
     elseif event == "TRADE_SHOW" then
-        if Rustcore.GetSetting("selfFound") then
-            C_Timer.After(0, function() CloseTrade() end)
-            print("|cffff4444Rustcore:|r Trading blocked (Self-Found mode).")
-        else
+        if not Rustcore.GetSetting("selfFound") then
+            -- Self-Found off: nothing to block, but the legacy icon state still
+            -- tracks whether this character ever took items from another player.
             BeginSelfFoundSource("trade")
         end
 

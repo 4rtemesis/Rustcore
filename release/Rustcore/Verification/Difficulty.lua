@@ -107,6 +107,25 @@ end
 
 -- Record the selected preset. Called at login and whenever the option changes.
 -- Section 8: this is bookkeeping, never a certification change.
+-- The hardest tier this character is still allowed to be certified for.
+--
+-- Two things hold it down, both permanent once set:
+--   permanentCapTier  an exception or a death that ran under weaker rules
+--   deathFloorTier    the weakest rule set that has ever governed a death
+--
+-- With neither, there is no ceiling: nothing has happened that a harder preset
+-- would have made harder.
+local function CertificationCeiling(track)
+    local ceiling = V.MAX_TIER
+    if type(track.permanentCapTier) == "number" and track.permanentCapTier < ceiling then
+        ceiling = track.permanentCapTier
+    end
+    if type(track.deathFloorTier) == "number" and track.deathFloorTier < ceiling then
+        ceiling = track.deathFloorTier
+    end
+    return ceiling
+end
+
 function D.SyncSelectedTier()
     local track = V.GetTrack("difficulty")
     if not track then return end
@@ -114,6 +133,28 @@ function D.SyncSelectedTier()
     local tier = V.GetCurrentTier()
     local previous = track.currentTier
     track.currentTier = tier
+
+    -- Selecting a harder preset raises the certification to match it.
+    --
+    -- Section 10 forbids a *setting change* from lifting a certification that
+    -- was lost, and that still holds: the ceiling above is what a cap or a death
+    -- pinned down, and nothing here can move it. What this allows is the case
+    -- the plan never covers -- a character whose record was created while an
+    -- easier preset was selected, most obviously one made at the default before
+    -- the player picked Dust on the login popup. Refusing to raise it there
+    -- certified the default forever and there was no way to ever reach the
+    -- harder tiers, which is plainly not what section 7 describes.
+    --
+    -- Harder rules are strictly more restrictive, so moving up is never a way to
+    -- dodge anything; only deaths under weaker rules are, and those set the
+    -- ceiling.
+    if V.IsCertified(track.status) then
+        local ceiling = CertificationCeiling(track)
+        local wanted = tier < ceiling and tier or ceiling
+        if wanted > (track.highestVerifiedTier or 0) then
+            track.highestVerifiedTier = wanted
+        end
+    end
 
     if previous and previous ~= tier then
         Append("DIFFICULTY_CHANGE", {
@@ -173,6 +214,19 @@ function D.OnDeath(context)
     track.deaths = (track.deaths or 0) + 1
     track.lastDeathAt = time and time() or nil
     track.lastDeathTier = selected
+
+    -- The weakest rule set that has ever actually governed a death. This is what
+    -- section 9 really measures: the character cannot claim to have maintained a
+    -- preset harder than the one that was in force when it mattered. Recorded
+    -- separately from permanentCapTier because CapDifficultyTier declines to
+    -- write a cap that would not lower anything -- dying at Rusted while already
+    -- certified Rusted sets no cap, but it must still stop a later switch to
+    -- Dust from certifying Dust.
+    if type(effective) == "number" then
+        if not track.deathFloorTier or effective < track.deathFloorTier then
+            track.deathFloorTier = effective
+        end
+    end
 
     Append("DEATH", {
         tier = selected,

@@ -294,6 +294,137 @@ function M.Run()
     if record.difficulty then
         record.difficulty.currentTier = V.GetCurrentTier()
     end
+
+    M.MaybeGrandfatherExisting(record)
+    M.RepairUnexplainedSelfFound(record)
+end
+
+-- Undo a Self-Found certification that was ended for no reason Rustcore can
+-- point at.
+--
+-- Earlier builds dropped the track straight to UNVERIFIED the moment Self-Found
+-- was switched off. UNVERIFIED is terminal -- V.SetStatus only moves downward --
+-- so a setting toggle permanently ended a run that had done nothing wrong. That
+-- behaviour is gone (the track is suspended now, and comes back), but characters
+-- are still carrying its result, and they cannot recover on their own.
+--
+-- Only the reason for a status is missing here, not the evidence behind it: an
+-- UNVERIFIED reached through tampering, a broken chain or an excessive tracking
+-- gap always leaves a trace, and every one of those traces is checked below.
+-- When none of them is present, nothing was ever actually detected, and the
+-- guiding principle is to certify rather than to withhold.
+--
+-- Repaired to SUSPENDED rather than to VERIFIED, so the ordinary restore path
+-- decides what happens next: certified once Self-Found is on again and the
+-- character has been watched cleanly, still paused until then.
+function M.RepairUnexplainedSelfFound(record)
+    if not record then return false end
+    local selfFound = record.selfFound
+    local difficulty = record.difficulty
+    if not selfFound or not difficulty then return false end
+
+    if selfFound.status ~= V.STATUS.UNVERIFIED then return false end
+    if not selfFound.claimed then return false end
+    if (selfFound.violations or 0) > 0 then return false end
+
+    if type(selfFound.warnings) == "table" then
+        for _, count in pairs(selfFound.warnings) do
+            if (count or 0) > 0 then return false end
+        end
+    end
+
+    -- Anything Rustcore genuinely detected would have marked these.
+    if record.tamperReason then return false end
+    local timeState = record.time or {}
+    if timeState.gapBand and timeState.gapBand ~= "OK" then return false end
+
+    -- The difficulty track is the honest summary of whether this character has
+    -- ever looked wrong. If that is still certified, nothing was found.
+    if not V.IsCertified(difficulty.status) then return false end
+
+    selfFound.status = V.STATUS.SUSPENDED
+    selfFound.suspended = true
+    selfFound.restoreAtTracked = nil
+    record.selfFoundRepairedAt = time and time() or 0
+
+    if V.Integrity and V.Integrity.Append then
+        V.Integrity.Append("SF_REPAIR", { from = V.STATUS.UNVERIFIED, to = V.STATUS.SUSPENDED })
+    end
+    if V.Integrity and V.Integrity.Seal then V.Integrity.Seal(record) end
+    return true
+end
+
+-- Plan section 4, applied to a record that already exists.
+--
+-- Legacy detection has to read RustcoreDB before any other module touches it,
+-- and it has to find this character's tables under whatever key an earlier
+-- session used. Either can miss -- most easily when UnitGUID is unavailable
+-- during ADDON_LOADED and the tables were written under a different key -- and
+-- when it missed, the character was written down as NEW_CHARACTER and started
+-- unverified despite a full history of Rustcore play.
+--
+-- The plan is unambiguous that this is the wrong outcome: existing Rustcore data
+-- is the starting truth, and a grandfathered player must not end up worse off
+-- than someone starting fresh today. So the question is asked again on later
+-- logins rather than only once.
+--
+-- Tightly bounded, because this is the one path that raises a certification.
+-- It only applies to a record that has never had anything happen to it: no
+-- deaths, no violations, no warnings, nothing recorded past its own creation.
+-- A record that was degraded by something Rustcore actually observed is never
+-- touched, so this cannot launder a failure.
+function M.MaybeGrandfatherExisting(record)
+    if not record or record.origin ~= "NEW_CHARACTER" then return false end
+    if not IsLegacyCharacter() then return false end
+
+    local difficulty = record.difficulty or {}
+    local selfFound = record.selfFound or {}
+
+    if (difficulty.deaths or 0) > 0 then return false end
+    if (difficulty.repairViolations or 0) > 0 then return false end
+    if (selfFound.violations or 0) > 0 then return false end
+    if difficulty.permanentCapTier or difficulty.deathFloorTier then return false end
+    if difficulty.status == V.STATUS.FAILED or selfFound.status == V.STATUS.FAILED then return false end
+
+    local function HasWarning(track)
+        if type(track.warnings) ~= "table" then return false end
+        for _, count in pairs(track.warnings) do
+            if (count or 0) > 0 then return true end
+        end
+        return false
+    end
+    if HasWarning(difficulty) or HasWarning(selfFound) then return false end
+
+    -- A tracking gap is evidence about this record's own history, not about
+    -- whether the character predates verification, and section 18 already
+    -- decided what it costs. Leave that verdict alone.
+    local timeState = record.time or {}
+    if timeState.gapBand and timeState.gapBand ~= "OK" then return false end
+
+    record.origin = "LEGACY_MIGRATION"
+    record.regrandfatheredAt = time and time() or 0
+
+    difficulty.status = V.STATUS.VERIFIED
+    difficulty.highestVerifiedTier = V.GetCurrentTier()
+    record.difficulty = difficulty
+
+    -- Self-Found is only granted where the old data shows it was actually being
+    -- played; a claim is never invented for a character that never made one.
+    if selfFound.claimed then
+        selfFound.status = V.STATUS.VERIFIED
+        record.selfFound = selfFound
+    end
+
+    if V.Integrity and V.Integrity.Append then
+        V.Integrity.Append("REGRANDFATHER", {
+            tier = difficulty.highestVerifiedTier or 0,
+            selfFound = selfFound.claimed and 1 or 0,
+        })
+    end
+    if V.Integrity and V.Integrity.Seal then V.Integrity.Seal(record) end
+
+    print("|cffff4444Rustcore:|r Existing Rustcore history found for this character. Verification restored.")
+    return true
 end
 
 -- Plan section 3: the record is bound to UnitGUID("player"). That GUID is not

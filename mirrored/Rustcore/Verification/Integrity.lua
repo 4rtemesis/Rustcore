@@ -31,7 +31,7 @@ local MOD_B, MUL_B = 67108859, 131071  -- largest prime below 2^26, 2^17-1
 
 -- Bumped whenever the sealed field list changes, so an addon update that seals
 -- different fields invalidates old seals instead of accusing the player.
-I.SEAL_VERSION = 3
+I.SEAL_VERSION = 8
 
 -- How many chain events are retained. Older entries roll off; the head still
 -- carries their contribution.
@@ -120,6 +120,39 @@ local function DurabilityDigest(record)
     return I.Hash(concat(parts, ";"))
 end
 
+-- Typed warning counts for one track, rendered deterministically.
+--
+-- Warnings are worth protecting in their own right: a single unexplained repair
+-- is one away from a failure (section 14), and any warning at all blocks a late
+-- start from ever being promoted (section 5). Deleting one from SavedVariables
+-- would be the cheapest way to undo both, so the counts are sealed.
+local function WarningsDigest(track)
+    local warnings = type(track) == "table" and track.warnings or nil
+    if type(warnings) ~= "table" then return "" end
+    local parts = {}
+    for kind, count in pairs(warnings) do
+        parts[#parts + 1] = tostring(kind) .. ":" .. tostring(count or 0)
+    end
+    sort(parts)
+    return concat(parts, ";")
+end
+
+-- Phase 7 economy counters.
+--
+-- `last` is the figure the next money change is measured against, so raising it
+-- by hand would make the gain it is hiding look like a loss and skip the check
+-- entirely. The anomaly tallies are sealed alongside it so a finding cannot be
+-- quietly erased after the fact.
+local function EconomyDigest(record)
+    local economy = record.economy
+    if type(economy) ~= "table" then return "" end
+    local money = type(economy.money) == "table" and economy.money or {}
+    local items = type(economy.items) == "table" and economy.items or {}
+    return format("%s:%s:%s:%s",
+        tostring(money.last or ""), tostring(money.unexplained or 0),
+        tostring(money.anomalies or 0), tostring(items.anomalies or 0))
+end
+
 -- The authoritative values the seal protects. Anything a tamperer would want to
 -- edit directly -- a status, a tier cap, the playtime counters -- belongs here.
 local function CriticalState(record)
@@ -145,7 +178,17 @@ local function CriticalState(record)
         sClaim      = selfFound.claimed and 1 or 0,
         sClaimLevel = selfFound.qualifyFromLevel or selfFound.claimedAtLevel,
         sLapsed     = selfFound.claimLapsed and 1 or 0,
+        sSusp       = selfFound.suspended and 1 or 0,
+        sRestore    = selfFound.restoreAtTracked,
+        -- Phase 5. A Self-Found failure is permanent and its cause is the
+        -- reason the buff is gone, so both are sealed against a quiet edit.
+        sViol       = selfFound.violations or 0,
+        sViolReason = selfFound.lastViolation,
+        dWarn       = WarningsDigest(difficulty),
+        sWarn       = WarningsDigest(selfFound),
+        economy     = EconomyDigest(record),
         dPending    = difficulty.pendingCapTier,
+        dFloor      = difficulty.deathFloorTier,
         anchor      = timeState.anchorPlayed,
         lastPlayed  = timeState.lastServerPlayed,
         tracked     = timeState.trackedSinceAnchor,

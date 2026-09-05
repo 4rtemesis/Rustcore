@@ -159,24 +159,168 @@ function SF.OnSettingChanged(enabled)
         -- which nothing stopped the character trading, so the claim cannot be
         -- vouched for any more.
         Append("SF_ENABLE", { level = V.GetPlayerLevel() or 0 })
-        if track.claimLapsed then
-            V.SetStatus("selfFound", V.STATUS.UNVERIFIED, "Self-Found was switched off")
-            track.claimLapsed = nil
-        end
+        -- A suspension Rustcore watched all the way through costs nothing on its
+        -- own; if something had arrived during it, SF.Fail would already have
+        -- taken the certification and V.SetStatus would refuse to give it back.
+        track.suspended = nil
+        track.claimLapsed = nil
+        SF.CheckRestore()
         Seal()
         RefreshBuff()
         return
     end
 
     if not track.claimed then return end
-    -- While Self-Found is off none of the section 19 restrictions are in force.
-    -- UNVERIFIED rather than FAILED: this is missing evidence, not proof of
-    -- anything (section 47).
+
+    -- Switching Self-Found off suspends the claim rather than ending it.
+    --
+    -- It used to drop straight to UNVERIFIED, which V.SetStatus can never undo,
+    -- so toggling the option off and immediately back on destroyed the
+    -- certification permanently. That punished a misclick as harshly as a
+    -- violation, which is exactly what section 51 says not to do.
+    --
+    -- The reasoning behind the old behaviour was that nothing is enforced while
+    -- the option is off, so the gap cannot be vouched for. That is true of
+    -- enforcement but not of observation: Rustcore is still loaded and still
+    -- watching trades, mail and the economy. Detection therefore follows the
+    -- claim rather than the option now, and anything that actually arrives
+    -- during a suspension is caught and costs the certification -- see SF.Fail,
+    -- which records it as UNVERIFIED rather than FAILED, because a player who
+    -- switched the mode off has opted out rather than cheated.
+    --
+    -- The buff disappears meanwhile regardless: GetSelfFoundIconState only
+    -- reports "verified" while the option is actually on.
     track.disabledAt = time and time() or 0
+    track.suspended = true
+    -- Watched the whole way through, so there is nothing to make up: switching
+    -- it back on restores the certification immediately.
+    track.restoreAtTracked = nil
     Append("SF_DISABLE", { level = V.GetPlayerLevel() or 0 })
-    V.SetStatus("selfFound", V.STATUS.UNVERIFIED, "Self-Found switched off")
+    V.SetStatus("selfFound", V.STATUS.SUSPENDED, "Self-Found switched off")
     Seal()
     RefreshBuff()
+end
+
+-- True while the claim exists but the player has the option switched off in
+-- this session. Distinct from claimLapsed, which is the harsher cross-session
+-- case: there Rustcore was not running and genuinely saw nothing.
+function SF.IsSuspended()
+    local track = V.GetTrack("selfFound")
+    if not track or not track.claimed then return false end
+    if track.suspended then return true end
+    return not Setting("selfFound")
+end
+
+-- Violation (plan sections 19, 43 and 47) ------------------------------------
+
+-- Permanent loss of the Self-Found certification. Reserved for a violation
+-- Rustcore actually observed -- an item or gold arriving from a prohibited
+-- source -- rather than for evidence that merely looks wrong; section 47 sends
+-- circumstantial findings to V.AddWarning instead.
+--
+-- Section 43: there is no reset. V.SetStatus only ever moves a track to a worse
+-- status, so a later toggle cannot lift this, and the chain event survives in
+-- the rolling window as the record of why.
+function SF.Fail(reason, detail)
+    local track = V.GetTrack("selfFound")
+    if not track then return false end
+    if track.status == V.STATUS.FAILED then return false end
+
+    track.violations = (track.violations or 0) + 1
+    track.lastViolation = reason
+
+    Append("SF_VIOLATION", {
+        reason = reason or "",
+        detail = detail or "",
+        level  = V.GetPlayerLevel() or 0,
+        count  = track.violations,
+        while_ = SF.IsSuspended() and "suspended" or "active",
+    })
+
+    -- A player who switched Self-Found off has opted out of the mode, not broken
+    -- a rule they were claiming to follow. Section 47 separates those: the first
+    -- is missing standing, the second is a violation. Both are permanent, since
+    -- V.SetStatus only ever moves a track downward.
+    local outcome = SF.IsSuspended() and V.STATUS.UNVERIFIED or V.STATUS.FAILED
+    V.SetStatus("selfFound", outcome, reason or "prohibited Self-Found acquisition")
+    Seal()
+    RefreshBuff()
+
+    -- Section 28: the wording reports a lost certification, never an accusation.
+    print("|cffff4444Rustcore:|r Self-Found verification lost: " .. tostring(reason or "prohibited acquisition") .. ".")
+    return true
+end
+
+-- Restoring a suspension --------------------------------------------------------
+
+-- How much clean tracked play is required before a suspension Rustcore did not
+-- watch can be lifted. Only applies to the cross-session case; a suspension that
+-- happened with the addon running is restored the moment Self-Found comes back
+-- on, because there is nothing Rustcore failed to see.
+SF.RESTORE_TRACKED_SECONDS = 1800
+
+-- Whether the certification may come back, and if not, what is still owed.
+-- Returns ok, reason, secondsRemaining.
+--
+-- The governing idea, and the reason this is deliberately generous: a suspension
+-- is not evidence of anything. The player turned a setting off. If Rustcore has
+-- not actually caught anything -- no violation, no anomaly, no tampering, and a
+-- difficulty track it still trusts -- then refusing to certify punishes them for
+-- a setting toggle, and the whole plan leans the other way when it is unsure.
+function SF.EvaluateRestore()
+    local track = V.GetTrack("selfFound")
+    if not track then return false, "no verification record" end
+    if track.status ~= V.STATUS.SUSPENDED then return false, "not suspended" end
+    if not track.claimed then return false, "no Self-Found claim" end
+    if not Setting("selfFound") then return false, "Self-Found is switched off" end
+
+    if (track.violations or 0) > 0 then
+        return false, "a Self-Found violation was recorded"
+    end
+    if type(track.warnings) == "table" then
+        for kind, count in pairs(track.warnings) do
+            if (count or 0) > 0 then
+                return false, "an unexplained change was recorded: " .. tostring(kind)
+            end
+        end
+    end
+
+    -- The difficulty track is the proxy for "has Rustcore seen anything wrong
+    -- with this character at all". Tampering, a broken integrity chain and an
+    -- excessive tracking gap all land on both tracks, so a difficulty track that
+    -- is still certified means none of them happened.
+    local difficulty = V.GetTrack("difficulty")
+    if difficulty and not V.IsCertified(difficulty.status) then
+        return false, "difficulty certification is not currently valid"
+    end
+
+    local required = track.restoreAtTracked
+    if type(required) == "number" then
+        local record = V.GetRecord()
+        local tracked = record and record.time and record.time.trackedSinceAnchor or 0
+        if tracked < required then
+            return false, "more clean play needed", required - tracked
+        end
+    end
+
+    return true, "clean play since Self-Found resumed"
+end
+
+-- Lift the suspension when it is due. Cheap and idempotent: it refuses unless
+-- the track is still SUSPENDED, so anything that might have moved the character
+-- closer can simply call it.
+function SF.CheckRestore()
+    local ok, reason = SF.EvaluateRestore()
+    if not ok then return false end
+    if not V.Restore("selfFound", reason) then return false end
+
+    local track = V.GetTrack("selfFound")
+    if track then track.restoreAtTracked = nil end
+
+    Seal()
+    RefreshBuff()
+    print("|cffff4444Rustcore:|r Self-Found verification restored.")
+    return true
 end
 
 -- Qualification (plan section 6) ---------------------------------------------
@@ -238,14 +382,33 @@ function SF.Init()
         end
 
         if not enabled then
-            -- Off at login with a claim on file. Rustcore did not see it happen
-            -- and will not degrade a status over an unobserved toggle -- that
-            -- would make a grandfathered character worse off for doing nothing
-            -- (section 4). The lapse is recorded instead, and it blocks
-            -- promotion and bites if the player claims Self-Found again.
+            -- Off at login with a claim on file. Rustcore did not watch whatever
+            -- happened while it was off, so the certification is paused -- but
+            -- paused, not ended: the player switched a setting, which is not
+            -- evidence of anything.
+            --
+            -- Because that stretch was unwatched, this one asks for a spell of
+            -- clean play once Self-Found comes back on, rather than restoring
+            -- the instant the box is ticked.
             track.claimLapsed = true
+            track.suspended = true
+            if not track.restoreAtTracked then
+                local record = V.GetRecord()
+                local tracked = record and record.time and record.time.trackedSinceAnchor or 0
+                track.restoreAtTracked = tracked + SF.RESTORE_TRACKED_SECONDS
+            end
+            V.SetStatus("selfFound", V.STATUS.SUSPENDED, "Self-Found was switched off")
             Seal()
+            RefreshBuff()
             return
+        end
+
+        -- Enabled at login. A suspension carried over from a previous session is
+        -- reconsidered here rather than only when the option is toggled.
+        if track.status == V.STATUS.SUSPENDED then
+            track.suspended = nil
+            track.claimLapsed = nil
+            SF.CheckRestore()
         end
 
         SF.CheckQualification()

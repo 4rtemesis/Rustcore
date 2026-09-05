@@ -14,7 +14,15 @@ Verification\Time.lua
 Verification\Migration.lua
 Verification\Difficulty.lua
 Verification\SelfFound.lua
+Verification\SelfFoundRestrict.lua
+Verification\NPCMailDB.lua
+Verification\Mail.lua
+Verification\Economy.lua
+Verification\Money.lua
+Verification\Inventory.lua
 Verification\Durability.lua
+Verification\Transfer.lua
+Verification\UI.lua
 RustcoreBroadcast.lua
 RustcoreSelfFoundBuff.lua
 RustcoreSelfFoundComm.lua

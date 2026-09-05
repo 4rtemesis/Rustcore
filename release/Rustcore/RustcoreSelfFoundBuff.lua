@@ -402,6 +402,18 @@ local function CreateTargetAuraButton()
     b.icon = b:CreateTexture(nil, "ARTWORK")
     b.icon:SetAllPoints(b)
 
+    -- Debuffs wear the coloured ring real ones do. Blizzard's own asset and
+    -- texcoords, taken from the TargetDebuffButton template, so it lines up with
+    -- the native frames rather than approximating them. The ring art is white;
+    -- the colour comes from DebuffTypeColor, which is what tells Magic from
+    -- Curse from Poison at a glance -- and plain red for anything undispellable.
+    b.debuffBorder = b:CreateTexture(nil, "OVERLAY")
+    b.debuffBorder:SetTexture("Interface\\Buttons\\UI-Debuff-Overlays")
+    b.debuffBorder:SetTexCoord(0.296875, 0.5703125, 0, 0.515625)
+    b.debuffBorder:SetPoint("TOPLEFT", b, "TOPLEFT", -1, 1)
+    b.debuffBorder:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 1, -1)
+    b.debuffBorder:Hide()
+
     -- Matches the radial "wipe" every real buff/debuff button shows for
     -- time remaining, including the faint glow along the swipe edge. The
     -- countdown-number overlay is a separate opt-in Blizzard adds on top of
@@ -441,9 +453,12 @@ local function AcquireTargetButton(i)
     return b
 end
 
-local function PositionTargetSlot(button, slotIndex)
+-- `rowOffset` pushes a run of icons onto its own line below the ones above it.
+-- Debuffs use it so they never share a row with buffs, the way the native
+-- target frame keeps its two rows apart.
+local function PositionTargetSlot(button, slotIndex, rowOffset)
     local col = (slotIndex - 1) % TARGET_PER_ROW
-    local row = math.floor((slotIndex - 1) / TARGET_PER_ROW)
+    local row = math.floor((slotIndex - 1) / TARGET_PER_ROW) + (rowOffset or 0)
     button:ClearAllPoints()
 
     -- Match Blizzard's TargetFrame_UpdateBuffAnchor constants directly.
@@ -515,13 +530,17 @@ function RefreshTargetIcon()
     PositionTargetSlot(icon, 1)
     icon:Show()
 
-    local slotIndex = 2
     local usedCount = 0
 
-    for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
+    -- Buffs and debuffs are laid out as two separate runs rather than one
+    -- continuous list. Sharing a counter made a debuff simply follow the last
+    -- buff along the same row, which is not how the native target frame reads:
+    -- there, debuffs are their own line and carry a coloured ring.
+    local function AddAura(filter, slotIndex, rowOffset)
         local auraIndex = 1
         while true do
-            local name, auraIcon, count, _, duration, expirationTime = UnitAura("target", auraIndex, filter)
+            local name, auraIcon, count, debuffType, duration, expirationTime =
+                UnitAura("target", auraIndex, filter)
             if not name then break end
 
             usedCount = usedCount + 1
@@ -536,13 +555,36 @@ function RefreshTargetIcon()
             else
                 b.cooldown:Hide()
             end
-            PositionTargetSlot(b, slotIndex)
+
+            if filter == "HARMFUL" then
+                local palette = _G.DebuffTypeColor
+                local color = palette and (palette[debuffType or "none"] or palette["none"])
+                -- Plain red is the right fallback: it is what Blizzard uses for
+                -- a debuff with no dispel type, and the only case this reaches
+                -- is a client that does not expose the table at all.
+                b.debuffBorder:SetVertexColor(
+                    color and color.r or 0.8,
+                    color and color.g or 0,
+                    color and color.b or 0)
+                b.debuffBorder:Show()
+            else
+                b.debuffBorder:Hide()
+            end
+
+            PositionTargetSlot(b, slotIndex, rowOffset)
             b:Show()
 
             slotIndex = slotIndex + 1
             auraIndex = auraIndex + 1
         end
+        return slotIndex
     end
+
+    -- Buffs continue the row the Self-Found icon opened at slot 1.
+    local afterBuffs = AddAura("HELPFUL", 2, 0)
+    -- Debuffs start fresh on the line under whatever the buffs filled.
+    local buffRows = math.ceil((afterBuffs - 1) / TARGET_PER_ROW)
+    AddAura("HARMFUL", 1, buffRows)
 
     for i = usedCount + 1, #targetButtonPool do
         targetButtonPool[i]:Hide()

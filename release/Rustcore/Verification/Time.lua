@@ -49,8 +49,17 @@ local function GetTimeState()
     state.anchorPlayed       = state.anchorPlayed       or nil
     state.trackedSinceAnchor = state.trackedSinceAnchor or 0
     state.untrackedSeconds   = state.untrackedSeconds   or 0
-    state.sessionTracked     = 0
     return state
+end
+
+-- Time accrued since this login. Deliberately a module local rather than a
+-- field on the record: "this session" is not a thing that should survive into
+-- SavedVariables, and Phase 8 relies on it being the real session total when it
+-- decides how much locally tracked play an import may keep (plan section 40).
+local sessionTracked = 0
+
+function T.GetSessionTracked()
+    return sessionTracked
 end
 
 function T.GetLastServerPlayed()
@@ -80,17 +89,81 @@ end
 --
 -- Arguments are forwarded verbatim: Classic and BCC call this as
 -- (totalTime, levelTime) while retail passes the chat frame first.
+-- Catch-all: filter the chat frames themselves.
+--
+-- Replacing ChatFrame_DisplayTimePlayed below is the tidy fix, but it only works
+-- on a client that still routes the reply through that function, and it loses to
+-- any addon that replaces the same global after us. Whatever prints the two
+-- lines has to reach a chat frame's AddMessage to do it, so filtering there
+-- catches the reply no matter which path produced it.
+--
+-- Matched by content against Blizzard's own localised format strings, so the
+-- filter drops exactly the two /played lines and nothing else, in any locale.
+local playedPatterns
+
+local function BuildPlayedPatterns()
+    playedPatterns = {}
+    for _, name in ipairs({ "TIME_PLAYED_TOTAL", "TIME_PLAYED_LEVEL" }) do
+        local fmt = _G[name]
+        if type(fmt) == "string" and fmt ~= "" then
+            -- Escape the literal parts, turn the placeholder into a wildcard.
+            local head = fmt:match("^(.-)%%s") or fmt
+            head = head:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+            if head ~= "" then playedPatterns[#playedPatterns + 1] = "^" .. head end
+        end
+    end
+end
+
+local function IsPlayedLine(message)
+    if type(message) ~= "string" then return false end
+    if not playedPatterns then BuildPlayedPatterns() end
+    for _, pattern in ipairs(playedPatterns) do
+        if message:find(pattern) then return true end
+    end
+    return false
+end
+
+local function InstallAddMessageFilter()
+    local count = NUM_CHAT_WINDOWS or 10
+    for index = 1, count do
+        local frame = _G["ChatFrame" .. index]
+        if frame and frame.AddMessage and not frame.rustcorePlayedFilter then
+            frame.rustcorePlayedFilter = true
+            local original = frame.AddMessage
+            frame.AddMessage = function(self, message, ...)
+                if pendingSilentRequest and IsPlayedLine(message) then return end
+                return original(self, message, ...)
+            end
+        end
+    end
+end
+
 local function InstallChatSuppression()
+    InstallAddMessageFilter()
     if originalDisplayTimePlayed then return end
     if type(ChatFrame_DisplayTimePlayed) ~= "function" then return end
 
     originalDisplayTimePlayed = ChatFrame_DisplayTimePlayed
     ChatFrame_DisplayTimePlayed = function(...)
-        if pendingSilentRequest then
-            pendingSilentRequest = false
-            return
-        end
+        -- Deliberately does not clear the flag. ChatFrame_OnEvent runs this once
+        -- per chat frame registered for TIME_PLAYED_MSG, so clearing on the
+        -- first call let every additional chat window print the reply anyway --
+        -- which is what the spam was. The flag is cleared one frame later
+        -- instead, by the handler below, once the whole dispatch is done.
+        if pendingSilentRequest then return end
         return originalDisplayTimePlayed(...)
+    end
+end
+
+-- Re-arm after the current event dispatch has finished. Every chat frame has
+-- had its turn by then, and a /played the player types themselves afterwards
+-- prints normally.
+local function ClearSilentRequestSoon()
+    if not pendingSilentRequest then return end
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function() pendingSilentRequest = false end)
+    else
+        pendingSilentRequest = false
     end
 end
 
@@ -126,7 +199,7 @@ local function Accrue()
     if elapsed <= 0 then return end
 
     state.trackedSinceAnchor = (state.trackedSinceAnchor or 0) + elapsed
-    state.sessionTracked = (state.sessionTracked or 0) + elapsed
+    sessionTracked = sessionTracked + elapsed
     state.lastAccruedAt = time and time() or nil
 
     -- The seal covers trackedSinceAnchor, so it has to be re-stamped or the
@@ -232,6 +305,7 @@ end
 local function OnEvent(_, event, ...)
     if event == "TIME_PLAYED_MSG" then
         local totalPlayed, levelPlayed = ...
+        ClearSilentRequestSoon()
         if type(totalPlayed) == "number" then
             Reconcile(totalPlayed, levelPlayed)
             -- The tracked-time floor in the qualification window can only

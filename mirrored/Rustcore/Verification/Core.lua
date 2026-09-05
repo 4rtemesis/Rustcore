@@ -16,6 +16,11 @@ V.SCHEMA_VERSION = 1
 V.STATUS = {
     VERIFIED   = "VERIFIED",
     WARNING    = "WARNING",
+    -- Not certified at the moment, but nothing is wrong: the certification is
+    -- paused and will come back on its own. Distinct from UNVERIFIED, which is
+    -- the end of the road, and from UNCERTAIN, which is a start that has not
+    -- earned certification yet rather than one that lost it.
+    SUSPENDED  = "SUSPENDED",
     UNCERTAIN  = "UNCERTAIN",
     UNVERIFIED = "UNVERIFIED",
     FAILED     = "FAILED",
@@ -27,10 +32,25 @@ V.STATUS = {
 local STATUS_RANK = {
     VERIFIED   = 1,
     WARNING    = 2,
-    UNCERTAIN  = 3,
-    UNVERIFIED = 4,
-    FAILED     = 5,
+    SUSPENDED  = 3,
+    UNCERTAIN  = 4,
+    UNVERIFIED = 5,
+    FAILED     = 6,
 }
+
+-- Statuses a character can still come back from. Everything else is final.
+-- The distinction the player actually cares about: "keep playing" versus "this
+-- run cannot be certified any more".
+local RECOVERABLE = {
+    VERIFIED  = true,
+    WARNING   = true,
+    SUSPENDED = true,
+    UNCERTAIN = true,
+}
+
+function V.IsRecoverable(status)
+    return RECOVERABLE[status or ""] == true
+end
 
 -- Difficulty presets, easiest to hardest, mirroring DIFF_LABELS in
 -- RustcoreOptions.lua. Higher index means more restrictive.
@@ -142,6 +162,22 @@ function V.CandidateKeys()
     local realm = GetPlayerRealmName and GetPlayerRealmName() or nil
     if name and realm and realm ~= "" then add(name .. "-" .. realm) end
     add(name)
+
+    -- Last resort, and the one that actually catches key drift. UnitGUID is not
+    -- dependable during ADDON_LOADED, so a session where it answered and one
+    -- where it did not will key the same character differently -- and none of
+    -- the guesses above can reproduce a GUID the client has not handed over yet.
+    -- EnsureProfile stamps characterLabel on every run, so matching on it finds
+    -- this character's tables whatever key they were written under.
+    if name and realm and realm ~= "" and RustcoreDB and type(RustcoreDB.profiles) == "table" then
+        local label = name .. "-" .. realm
+        for key, profile in pairs(RustcoreDB.profiles) do
+            if type(profile) == "table" and profile.characterLabel == label then
+                add(key)
+            end
+        end
+    end
+
     return keys
 end
 
@@ -253,6 +289,25 @@ function V.Promote(trackName, reason)
     return true
 end
 
+-- The other sanctioned upward move: SUSPENDED -> VERIFIED, once whatever paused
+-- the certification is over. Like Promote it refuses every other status, so a
+-- run that was genuinely disqualified can never be talked back up.
+--
+-- The caller decides whether restoring is warranted; this only enforces that
+-- SUSPENDED is the one state it may be done from.
+function V.Restore(trackName, reason)
+    local track = V.GetTrack(trackName)
+    if not track or track.status ~= V.STATUS.SUSPENDED then return false end
+
+    track.status = V.STATUS.VERIFIED
+    AppendChain("RESTORE", {
+        track = trackName,
+        to = V.STATUS.VERIFIED,
+        reason = reason or "",
+    })
+    return true
+end
+
 -- ── Late-start qualification (plan sections 5 and 6) ─────────────────────────
 
 -- Answers one question: may this track be promoted out of UNCERTAIN right now?
@@ -314,6 +369,11 @@ function V.CheckQualifications()
     end
     if V.SelfFound and V.SelfFound.CheckQualification then
         V.SelfFound.CheckQualification()
+    end
+    -- A suspension waiting out its clean-play requirement is lifted from here
+    -- too, so the five-minute /played poll doubles as its retry.
+    if V.SelfFound and V.SelfFound.CheckRestore then
+        V.SelfFound.CheckRestore()
     end
 end
 
@@ -416,10 +476,36 @@ function V.Init()
     if V.SelfFound and V.SelfFound.Init then
         V.SelfFound.Init()
     end
+    -- After SelfFound, because the restrictions report violations through
+    -- V.SelfFound.Fail and read the claim it just settled.
+    if V.SelfFoundRestrict and V.SelfFoundRestrict.Init then
+        V.SelfFoundRestrict.Init()
+    end
+    -- Mail belongs to the same group: it classifies against NPCMailDB and
+    -- reports through the same track.
+    if V.Mail and V.Mail.Init then
+        V.Mail.Init()
+    end
+    -- Economy first of the three: it owns the activity context and the
+    -- thresholds that Money and Inventory both consult.
+    if V.Economy and V.Economy.Init then
+        V.Economy.Init()
+    end
+    if V.Money and V.Money.Init then
+        V.Money.Init()
+    end
+    if V.Inventory and V.Inventory.Init then
+        V.Inventory.Init()
+    end
     -- Durability last: it compares against the stored snapshot and reports
     -- through V.Difficulty, so both must already exist.
     if V.Durability and V.Durability.Init then
         V.Durability.Init()
+    end
+    -- Transfer only listens for /played replies; it reads every other module's
+    -- state on demand, so it goes up once they all exist.
+    if V.Transfer and V.Transfer.Init then
+        V.Transfer.Init()
     end
 
     -- UnitGUID("player") is not dependable during ADDON_LOADED, so the record
@@ -489,8 +575,46 @@ SlashCmdList["RCVERIFY"] = function()
         tostring(difficulty.status),
         V.GetTierName(difficulty.highestVerifiedTier or 0),
         V.GetTierName(V.GetCurrentTier())))
-    print(string.format("  Self-Found: %s  claimed: %s",
-        tostring(selfFound.status), selfFound.claimed and "yes" or "no"))
+    print(string.format("  Self-Found: %s  claimed: %s  buff: %s",
+        tostring(selfFound.status),
+        selfFound.claimed and "yes" or "no",
+        V.IsSelfFoundCertified() and "shown" or "hidden"))
+
+    local enforcing = V.SelfFoundRestrict and V.SelfFoundRestrict.IsEnforcing
+        and V.SelfFoundRestrict.IsEnforcing()
+    local mailOn = V.Mail and V.Mail.IsEnforcing and V.Mail.IsEnforcing()
+    print(string.format("    Trade/AH: %s   Mail: %s   violations: %d%s",
+        enforcing and "blocked" or "not enforced",
+        mailOn and "filtered" or "not enforced",
+        selfFound.violations or 0,
+        selfFound.lastViolation and ("  (" .. tostring(selfFound.lastViolation) .. ")") or ""))
+
+    local economy = record.economy
+    if economy and V.Economy then
+        local money = economy.money or {}
+        local items = economy.items or {}
+        local level = V.GetPlayerLevel() or 1
+        print(string.format("    Economy: unexplained %s over %d event(s), item flags %d",
+            V.Economy.FormatMoney(money.unexplained or 0),
+            money.anomalies or 0, items.anomalies or 0))
+        print(string.format("      Gold thresholds at level %d: warn %s  fail %s   failures %s",
+            level,
+            V.Economy.FormatMoney(V.Economy.GetGoldWarningThreshold(level)),
+            V.Economy.FormatMoney(V.Economy.GetGoldFailureThreshold(level)),
+            V.Economy.ALLOW_ECONOMY_FAILURE and "enabled" or "|cffffd700warn-only|r"))
+    end
+
+    local warnings = {}
+    for kind, count in pairs(selfFound.warnings or {}) do
+        warnings[#warnings + 1] = string.format("%s=%d", tostring(kind), count or 0)
+    end
+    for kind, count in pairs(difficulty.warnings or {}) do
+        warnings[#warnings + 1] = string.format("%s=%d", tostring(kind), count or 0)
+    end
+    if #warnings > 0 then
+        table.sort(warnings)
+        print("    Warnings: " .. table.concat(warnings, "  "))
+    end
 
     local allowed = V.Time and V.Time.GetAllowedGap and V.Time.GetAllowedGap() or 0
     print(string.format("  Played: %s   tracked: %s   untracked: %s (allowed %s)",

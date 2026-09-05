@@ -341,7 +341,7 @@ local function BuildOptionsFrame()
     -- panel and its text both live on this one elevated child frame instead.
     local titleFrame = CreateFrame("Frame", nil, f)
     titleFrame:SetSize(96, 18)
-    titleFrame:SetPoint("CENTER", f, "TOP", 0, -3)
+    titleFrame:SetPoint("CENTER", f, "TOP", 0, -15)
     titleFrame:SetFrameLevel(f:GetFrameLevel() + 5)
 
     local titlePanel = titleFrame:CreateTexture(nil, "ARTWORK")
@@ -377,7 +377,7 @@ local function BuildOptionsFrame()
     local RefreshAllControls
 
     local diffHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    diffHeader:SetPoint("TOP", f, "TOP", 0, -48)
+    diffHeader:SetPoint("TOP", f, "TOP", 0, -58)
     diffHeader:SetJustifyH("CENTER")
     diffHeader:SetText("")
     ApplyBodyFont(diffHeader, 18)
@@ -499,7 +499,7 @@ local function BuildOptionsFrame()
         "UIPanelScrollFrameTemplate"
     )
     interfaceScroll:SetPoint("TOPLEFT", interfacePage, "TOPLEFT", 0, 0)
-    interfaceScroll:SetPoint("BOTTOMRIGHT", interfacePage, "BOTTOMRIGHT", -24, 0)
+    interfaceScroll:SetPoint("BOTTOMRIGHT", interfacePage, "BOTTOMRIGHT", -24, 42)
     interfaceScroll:EnableMouseWheel(true)
 
     local interfaceContent = CreateFrame("Frame", nil, interfaceScroll)
@@ -522,7 +522,7 @@ local function BuildOptionsFrame()
         "UIPanelScrollFrameTemplate"
     )
     notificationsScroll:SetPoint("TOPLEFT", notificationsPage, "TOPLEFT", 0, 0)
-    notificationsScroll:SetPoint("BOTTOMRIGHT", notificationsPage, "BOTTOMRIGHT", -24, 0)
+    notificationsScroll:SetPoint("BOTTOMRIGHT", notificationsPage, "BOTTOMRIGHT", -24, 42)
     notificationsScroll:EnableMouseWheel(true)
 
     local notificationsContent = CreateFrame("Frame", nil, notificationsScroll)
@@ -545,7 +545,7 @@ local function BuildOptionsFrame()
         "UIPanelScrollFrameTemplate"
     )
     appearanceScroll:SetPoint("TOPLEFT", appearancePage, "TOPLEFT", 0, 0)
-    appearanceScroll:SetPoint("BOTTOMRIGHT", appearancePage, "BOTTOMRIGHT", -24, 0)
+    appearanceScroll:SetPoint("BOTTOMRIGHT", appearancePage, "BOTTOMRIGHT", -24, 42)
     appearanceScroll:EnableMouseWheel(true)
 
     local appearanceContent = CreateFrame("Frame", nil, appearanceScroll)
@@ -562,21 +562,55 @@ local function BuildOptionsFrame()
     end)
 
     -- Gameplay
-    local rulesHeader = MakeHeader(gameplayPage, "Rules", -20)
+    --
+    -- The exceptions are laid out by what they cost, because the cost is not
+    -- obvious from the labels and it is permanent once a death makes it matter.
+    -- Each one says underneath it what it does to certification, colour-coded so
+    -- the harmless one does not read like the disqualifying one.
+    local NOTE_NEUTRAL = { 0.6, 0.75, 0.6 }
+    local NOTE_CAUTION = { 0.85, 0.7,  0.35 }
+    local NOTE_SEVERE  = { 0.85, 0.4,  0.35 }
+
+    local function MakeRuleNote(anchorTo, text, color, xOff)
+        local note = gameplayPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        note:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", xOff or 30, -1)
+        note:SetWidth(330)
+        note:SetJustifyH("LEFT")
+        note:SetWordWrap(true)
+        note:SetText(text)
+        ApplyBodyFont(note, 13)
+        note:SetTextColor(color[1], color[2], color[3])
+        return note
+    end
+
+    local rulesHeader = MakeHeader(gameplayPage, "Self-Found", -20)
     local cbSelfFound = MakeCheckbox(gameplayPage,
         "Self-Found Mode",
         "Blocks access to the mailbox, auction house, and player trading.",
         rulesHeader, -6, "selfFound")
 
+    local selfFoundNote = MakeRuleNote(cbSelfFound,
+        "A mode of its own, certified separately. Does not affect your difficulty.",
+        NOTE_NEUTRAL)
+
     local cbSelfFoundBuff = MakeCheckbox(gameplayPage,
         "Show Buff Icon",
         "Shows verified Self-Found status as a buff icon on your buff bar. Disable to leave your buff bar untouched.",
-        cbSelfFound, -3, "selfFoundBuffEnabled", 34, 20, 14)
+        selfFoundNote, -3, "selfFoundBuffEnabled", 4, 20, 14)
+
+    local exceptionsHeader = gameplayPage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    exceptionsHeader:SetPoint("TOPLEFT", cbSelfFoundBuff, "BOTTOMLEFT", -34, -14)
+    exceptionsHeader:SetText("Death Rule Exceptions")
+    ApplyBodyFont(exceptionsHeader, 19)
 
     local cbPvpDeathProtection = MakeCheckbox(gameplayPage,
         "Ignore PVP Death",
         "If an enemy player damages you at any point during a combat, dying in the same combat will not mark any items for deletion.",
-        cbSelfFoundBuff, -4, "ignoreDeathAfterEnemyPlayerDamage", -34)
+        exceptionsHeader, -6, "ignoreDeathAfterEnemyPlayerDamage")
+
+    local pvpNote = MakeRuleNote(cbPvpDeathProtection,
+        "Does not affect verification.",
+        NOTE_NEUTRAL)
 
     local cbWeapon = MakeCheckbox(gameplayPage,
         "Keep Main Weapon",
@@ -584,15 +618,23 @@ local function BuildOptionsFrame()
         .."Hunter: Ranged slot\n"
         .."Melee (Warrior/Paladin/Rogue/Shaman/Druid): Main Hand\n"
         .."Caster (Priest/Mage/Warlock): Wand if equipped, else Main Hand",
-        cbPvpDeathProtection, -4, "keepMainWeapon")
+        pvpNote, -4, "keepMainWeapon", -30)
+
+    local weaponNote = MakeRuleNote(cbWeapon,
+        "Caps difficulty verification at Rusted, once a death actually spares the weapon.",
+        NOTE_CAUTION)
 
     local cbRepair = MakeCheckbox(gameplayPage,
         "Allow Item Repair",
         "Allows repair at merchants. By default repair is always blocked.",
-        cbWeapon, -4, "allowRepair")
+        weaponNote, -4, "allowRepair", -30)
 
-    MakeRule(gameplayPage, -205)
-    local profileHeader = MakeHeader(gameplayPage, "Character Profile", -225)
+    MakeRuleNote(cbRepair,
+        "Disqualifies every difficulty verification, once you actually repair.",
+        NOTE_SEVERE)
+
+    MakeRule(gameplayPage, -300)
+    local profileHeader = MakeHeader(gameplayPage, "Character Profile", -318)
 
     local profileDesc = gameplayPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     profileDesc:SetPoint("TOPLEFT", profileHeader, "BOTTOMLEFT", 0, -6)
@@ -752,13 +794,64 @@ local function BuildOptionsFrame()
         function(value) return tostring(value) end
     )
 
-    -- Tempered Souls
-    local waitingText = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    waitingText:SetPoint("TOPLEFT", temperedPage, "TOPLEFT", 26, -28)
-    waitingText:SetPoint("TOPRIGHT", temperedPage, "TOPRIGHT", -26, -28)
-    waitingText:SetJustifyH("LEFT")
-    waitingText:SetText("Waiting for tempered souls to appear.")
-    ApplyBodyFont(waitingText, 17)
+    -- About
+    local aboutTitle = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    aboutTitle:SetPoint("TOPLEFT", temperedPage, "TOPLEFT", 26, -26)
+    aboutTitle:SetJustifyH("LEFT")
+    aboutTitle:SetText("Rustcore")
+    ApplyBodyFont(aboutTitle, 22)
+    aboutTitle:SetTextColor(1, 0.82, 0)
+
+    local aboutBy = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    aboutBy:SetPoint("TOPLEFT", aboutTitle, "BOTTOMLEFT", 0, -4)
+    aboutBy:SetJustifyH("LEFT")
+    aboutBy:SetText("Made by Artemesis")
+    ApplyBodyFont(aboutBy, 15)
+    aboutBy:SetTextColor(0.75, 0.75, 0.75)
+
+    local aboutBody = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    aboutBody:SetPoint("TOPLEFT", aboutBy, "BOTTOMLEFT", 0, -14)
+    aboutBody:SetPoint("TOPRIGHT", temperedPage, "TOPRIGHT", -26, 0)
+    aboutBody:SetJustifyH("LEFT")
+    aboutBody:SetWordWrap(true)
+    aboutBody:SetText(
+        "Rustcore turns gear into something you can lose. Repair is off, and "
+        .. "dying destroys equipped items -- how many is up to the difficulty "
+        .. "you choose, from a single item at Broken to everything you are "
+        .. "wearing at Dust. Items worn down to zero durability rust away for "
+        .. "good.\n\n"
+        .. "Self-Found mode goes further and closes off trading, the auction "
+        .. "house and player mail, so everything you own you found yourself.\n\n"
+        .. "Rustcore keeps track of whether you have actually played by these "
+        .. "rules. The Verification tab shows what it can vouch for.")
+    ApplyBodyFont(aboutBody, 14)
+
+    local aboutJoin = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    aboutJoin:SetPoint("TOPLEFT", aboutBody, "BOTTOMLEFT", 0, -14)
+    aboutJoin:SetPoint("TOPRIGHT", temperedPage, "TOPRIGHT", -26, 0)
+    aboutJoin:SetJustifyH("LEFT")
+    aboutJoin:SetWordWrap(true)
+    aboutJoin:SetText("Want to help build Rustcore? Have a look at the CurseForge "
+        .. "page description to find out how to get involved.")
+    ApplyBodyFont(aboutJoin, 14)
+    aboutJoin:SetTextColor(0.85, 0.75, 0.5)
+
+    -- Tempered Souls: the supporters section, kept at the bottom of the page.
+    local temperedTitle = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    temperedTitle:SetPoint("TOPLEFT", aboutJoin, "BOTTOMLEFT", 0, -24)
+    temperedTitle:SetJustifyH("LEFT")
+    temperedTitle:SetText("Tempered Souls")
+    ApplyBodyFont(temperedTitle, 18)
+    temperedTitle:SetTextColor(1, 0.82, 0)
+
+    local temperedBody = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    temperedBody:SetPoint("TOPLEFT", temperedTitle, "BOTTOMLEFT", 0, -6)
+    temperedBody:SetPoint("TOPRIGHT", temperedPage, "TOPRIGHT", -26, 0)
+    temperedBody:SetJustifyH("LEFT")
+    temperedBody:SetWordWrap(true)
+    temperedBody:SetText("Thank you to the supporters, who help this addon stay up to date.")
+    ApplyBodyFont(temperedBody, 14)
+    temperedBody:SetTextColor(0.8, 0.8, 0.8)
 
     local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown", gameplayPage, "UIDropDownMenuTemplate")
     importDropdown:SetPoint("TOPLEFT", profileDesc, "BOTTOMLEFT", 0, -10)
@@ -898,18 +991,33 @@ local function BuildOptionsFrame()
 
     RefreshImportDropdownText()
 
+    -- Verification tab. Built by Verification/UI.lua, which owns everything
+    -- inside the page; this only supplies the frame and the tab that shows it.
+    local verificationPage = MakePage()
+    local refreshVerification
+    if RustcoreVerification and RustcoreVerification.UI and RustcoreVerification.UI.BuildPage then
+        refreshVerification = RustcoreVerification.UI.BuildPage(verificationPage)
+    end
+    f.refreshVerification = refreshVerification
+
     local pages = {
         gameplay = gameplayPage,
         interface = interfacePage,
         notifications = notificationsPage,
         appearance = appearancePage,
         tempered = temperedPage,
+        verification = verificationPage,
     }
     local tabs = {}
 
     local function ShowPage(pageKey)
         for key, page in pairs(pages) do
             if key == pageKey then page:Show() else page:Hide() end
+        end
+        -- Verification state moves while the window is closed, so the page is
+        -- rebuilt from the record every time it is opened rather than kept live.
+        if pageKey == "verification" and refreshVerification then
+            pcall(refreshVerification)
         end
         for key, tab in pairs(tabs) do
             local selected = key == pageKey
@@ -967,7 +1075,8 @@ local function BuildOptionsFrame()
     MakeTab("interface", "Interface", 2)
     MakeTab("notifications", "Notifications", 3)
     MakeTab("appearance", "Appearance", 4)
-    MakeTab("tempered", "Tempered Souls", 5)
+    MakeTab("tempered", "About", 5)
+    MakeTab("verification", "Verification", 6)
     ShowPage("gameplay")
 
     -- Store refs for Refresh
