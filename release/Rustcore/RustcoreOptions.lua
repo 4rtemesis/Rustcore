@@ -13,13 +13,8 @@ local DIFF_DESCS  = {
     [4] = "Lose 50% of your equipped items on death (rounded up).",
     [5] = "Lose every equipped item on death.",
 }
-local DIFF_COLORS = {
-    [1] = { 0.494, 0.663, 0.337 },
-    [2] = { 0.62, 0.58, 0.28 },
-    [3] = { 0.72, 0.43, 0.19 },
-    [4] = { 0.62, 0.22, 0.16 },
-    [5] = { 0.52, 0.07, 0.06 },
-}
+-- Shared with the stats counters, which tint themselves from the same palette.
+local DIFF_COLORS = Rustcore.DIFFICULTY_COLORS
 
 local backdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 local DEFAULT_TITLE_TEXT = "OPTIONS"
@@ -198,6 +193,11 @@ end
 -- the combat-lock state.
 local DEPENDENT_TOGGLES = {
     { parentKey = "selfFound",          field = "cbSelfFoundBuff" },
+    { parentKey = "showStatsWindow",    field = "cbStatRusted" },
+    { parentKey = "showStatsWindow",    field = "cbStatBroken" },
+    { parentKey = "showStatsWindow",    field = "cbStatDeaths" },
+    { parentKey = "showStatsWindow",    field = "cbStatBestItem" },
+    { parentKey = "showStatsWindow",    field = "cbStatsColoredNumbers" },
     { parentKey = "showDurabilityHUD",  field = "cbDurShowAll" },
     { parentKey = "showDurabilityHUD",  field = "cbDurGrowUpward" },
     { parentKey = "showDurabilityHUD",  field = "cbDurReverseOrder" },
@@ -285,6 +285,11 @@ local function RefreshCombatLockState(frame)
         frame.cbDurGrowUpward,
         frame.cbDurReverseOrder,
         frame.cbStatsHorizontal,
+        frame.cbStatRusted,
+        frame.cbStatBroken,
+        frame.cbStatDeaths,
+        frame.cbStatBestItem,
+        frame.cbStatsColoredNumbers,
         frame.cbDragonPlayerFrame,
         frame.cbDragonTargetFrame,
         frame.importBtn,
@@ -549,7 +554,7 @@ local function BuildOptionsFrame()
     appearanceScroll:EnableMouseWheel(true)
 
     local appearanceContent = CreateFrame("Frame", nil, appearanceScroll)
-    appearanceContent:SetSize(410, 520)
+    appearanceContent:SetSize(410, 560)
     appearanceScroll:SetScrollChild(appearanceContent)
 
     local appearanceScrollBar = appearanceScroll.ScrollBar
@@ -680,10 +685,30 @@ local function BuildOptionsFrame()
         "Arranges all stats window elements in a single row instead of two.",
         cbStats, -3, "statsHorizontalLayout", 34, 20, 14)
 
+    local cbStatRusted = MakeCheckbox(interfaceContent,
+        "Rusted Counter",
+        "Show the count of items worn down to zero durability.",
+        cbStatsHorizontal, -3, "statShowRusted", 0, 20, 14)
+
+    local cbStatBroken = MakeCheckbox(interfaceContent,
+        "Broken Counter",
+        "Show the count of items destroyed on death.",
+        cbStatRusted, -3, "statShowBroken", 0, 20, 14)
+
+    local cbStatDeaths = MakeCheckbox(interfaceContent,
+        "Deaths Counter",
+        "Show how many times this character has died.",
+        cbStatBroken, -3, "statShowDeaths", 0, 20, 14)
+
+    local cbStatBestItem = MakeCheckbox(interfaceContent,
+        "Best Item Lost",
+        "Show the highest item level piece this character has lost.",
+        cbStatDeaths, -3, "statShowBestItem", 0, 20, 14)
+
     local cbDragonPlayerFrame = MakeCheckbox(interfaceContent,
         "Dragon on Player Frame",
         "Shows a dragon on your own player frame that reflects your current difficulty tier.",
-        cbStatsHorizontal, -7, "dragonPlayerFrame", -34)
+        cbStatBestItem, -7, "dragonPlayerFrame", -34)
 
     local cbDragonTargetFrame = MakeCheckbox(interfaceContent,
         "Dragon on Target Frame",
@@ -755,42 +780,47 @@ local function BuildOptionsFrame()
     )
 
     -- Appearance
-    MakeHeader(appearanceContent, "Stats Panel", -20)
+    local statsAppearanceHeader = MakeHeader(appearanceContent, "Stats Panel", -20)
+    local cbStatsColoredNumbers = MakeCheckbox(appearanceContent,
+        "Coloured Numbers",
+        "Tints each stats counter with its matching difficulty colour instead of showing them all in the same tone.",
+        statsAppearanceHeader, -6, "statsColoredNumbers", 8, 22, 15)
+
     local opacitySlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreStatsOpacitySlider",
         "Background Opacity",
-        -65, 0, 1, 0.01, "statsBackgroundOpacity",
+        -97, 0, 1, 0.01, "statsBackgroundOpacity",
         PercentFormatter
     )
     local shadowSlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreStatsShadowSlider",
         "Dark Overlay",
-        -130, 0, 1, 0.01, "statsBackgroundShadow",
+        -162, 0, 1, 0.01, "statsBackgroundShadow",
         PercentFormatter
     )
-    MakeRule(appearanceContent, -185)
-    MakeHeader(appearanceContent, "Death Log", -205)
+    MakeRule(appearanceContent, -217)
+    MakeHeader(appearanceContent, "Death Log", -237)
     local deathlogOpacitySlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogOpacitySlider",
         "Background Opacity",
-        -250, 0, 1, 0.01, "deathlogBackgroundOpacity",
+        -282, 0, 1, 0.01, "deathlogBackgroundOpacity",
         PercentFormatter
     )
     local deathlogShadowSlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogShadowSlider",
         "Dark Overlay",
-        -315, 0, 1, 0.01, "deathlogBackgroundShadow",
+        -347, 0, 1, 0.01, "deathlogBackgroundShadow",
         PercentFormatter
     )
     local deathlogFontSlider = MakeSettingSlider(
         appearanceContent,
         "RustcoreDeathlogFontSlider",
         "Font Size",
-        -380, 9, 16, 1, "deathlogFontSize",
+        -412, 9, 16, 1, "deathlogFontSize",
         function(value) return tostring(value) end
     )
 
@@ -1093,6 +1123,11 @@ local function BuildOptionsFrame()
     f.cbShowWarning = cbShowWarning
     f.cbShowWarningSound = cbShowWarningSound
     f.cbStats       = cbStats
+    f.cbStatRusted  = cbStatRusted
+    f.cbStatBroken  = cbStatBroken
+    f.cbStatDeaths  = cbStatDeaths
+    f.cbStatBestItem = cbStatBestItem
+    f.cbStatsColoredNumbers = cbStatsColoredNumbers
     f.cbDeathlog = cbDeathlog
     f.cbDeathlogLevel = cbDeathlogLevel
     f.cbDeathlogCount = cbDeathlogCount
@@ -1151,6 +1186,11 @@ local function BuildOptionsFrame()
         self.cbDurGrowUpward:Refresh()
         self.cbDurReverseOrder:Refresh()
         self.cbStatsHorizontal:Refresh()
+        self.cbStatRusted:Refresh()
+        self.cbStatBroken:Refresh()
+        self.cbStatDeaths:Refresh()
+        self.cbStatBestItem:Refresh()
+        self.cbStatsColoredNumbers:Refresh()
         self.cbDragonPlayerFrame:Refresh()
         self.cbDragonTargetFrame:Refresh()
         self.RefreshImportDropdownText()

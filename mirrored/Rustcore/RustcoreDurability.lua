@@ -210,10 +210,33 @@ local activeOrder  = {} -- slot ids in current stack order (1 = nearest anchor);
                          -- stable across updates so existing icons don't
                          -- reshuffle as durability percentages change —
                          -- newly-visible slots are inserted by rank instead
-local lastLinkBySlot = {} -- slot id -> item link last seen there; lets a
+local lastLinkBySlot = {} -- slot id -> item identity last seen there; lets a
                            -- re-equip into an already-tracked slot be treated
                            -- as a new insertion instead of keeping the old
                            -- item's rank position
+
+-- What counts as "the same item still in this slot".
+--
+-- An item link cannot answer that on its own: durability is not part of a link,
+-- so two copies of the same sword produce byte-identical links no matter how
+-- worn each one is. Swapping one for the other therefore looked like nothing had
+-- happened -- the icon kept its rank, and a fresh copy replacing a broken one
+-- could even trip the "just broke" flash.
+--
+-- C_Item.GetItemGUID does distinguish the two copies. It exists on the Classic
+-- clients but is feature-detected anyway, and the link is the fallback where it
+-- is missing -- no worse than the behaviour this replaces.
+local function GetSlotIdentity(slot, link)
+    if C_Item and C_Item.GetItemGUID and ItemLocation and ItemLocation.CreateFromEquipmentSlot then
+        local ok, guid = pcall(function()
+            local loc = ItemLocation:CreateFromEquipmentSlot(slot)
+            if not loc or not loc:IsValid() then return nil end
+            return C_Item.GetItemGUID(loc)
+        end)
+        if ok and guid then return guid end
+    end
+    return link
+end
 local lastDurabilityBySlot = {} -- slot id -> durability last seen there for
                                  -- the item currently in lastLinkBySlot; used
                                  -- to detect the >0 -> 0 "just broke" edge
@@ -680,6 +703,8 @@ local function UpdateHUD()
         local visible = false
         local pct     = 1  -- default; overwritten when durability is read
 
+        local identity = link and GetSlotIdentity(slot, link) or nil
+
         if link then
             local current, maximum = GetInventoryItemDurability(slot)
             if current ~= nil and maximum ~= nil and maximum > 0 then
@@ -706,7 +731,7 @@ local function UpdateHUD()
                     -- "Just broke" edge: only fires when we previously saw this
                     -- same item above 0 durability, not on login/re-equip with
                     -- an already-broken item.
-                    local prevDurability = (link == lastLinkBySlot[slot]) and lastDurabilityBySlot[slot] or nil
+                    local prevDurability = (identity == lastLinkBySlot[slot]) and lastDurabilityBySlot[slot] or nil
                     if current == 0 and prevDurability and prevDurability > 0 then
                         HandleItemBroke(entry.frame)
                     end
@@ -732,7 +757,7 @@ local function UpdateHUD()
 
         entry.frame:SetShown(visible)
         if visible then
-            visibleSlots[#visibleSlots + 1] = { slot = slot, pct = pct, link = link }
+            visibleSlots[#visibleSlots + 1] = { slot = slot, pct = pct, link = identity }
         end
     end
 
@@ -825,13 +850,25 @@ local function UpdateHUD()
         if walkReversed then
             first, last, step = #activeOrder, 1, -1
         end
+        -- Every frame overlaps the one below it by SLOT_GAP, which hides the
+        -- transparent sliver at the bottom of the frame art. The bottom-most
+        -- frame has nothing under it to do that hiding, so its own bottom edge
+        -- shows and reads as a one-pixel seam against the row above. Pulling
+        -- just that frame up by a pixel closes it without disturbing the rest of
+        -- the stack, which already sits flush.
+        --
+        -- Which iteration is visually lowest depends on the anchor: growing
+        -- upward pins the bottom edge, so the first frame placed is the lowest;
+        -- growing downward pins the top, so the last one is.
+        local bottomIteration = growUpward and first or last
         for i = first, last, step do
             local sf = frameBySlot[activeOrder[i]]
+            local nudge = (i == bottomIteration) and 1 or 0
             sf:ClearAllPoints()
             if growUpward then
-                sf:SetPoint("BOTTOMLEFT", hudContainer, "BOTTOMLEFT", 0, -yOff)
+                sf:SetPoint("BOTTOMLEFT", hudContainer, "BOTTOMLEFT", 0, -yOff + nudge)
             else
-                sf:SetPoint("TOPLEFT", hudContainer, "TOPLEFT", 0, yOff)
+                sf:SetPoint("TOPLEFT", hudContainer, "TOPLEFT", 0, yOff + nudge)
             end
             yOff = yOff - FRAME_H - SLOT_GAP
         end
@@ -861,10 +898,22 @@ evFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
 evFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 evFrame:SetScript("OnEvent", function(_, event, unit)
     if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
+    if not hudContainer then return end
+
     -- Deferred one frame: GetInventoryItemDurability can still report the
     -- previous item's value in the same tick the inventory-changed event
     -- fires, before the client's local item cache has caught up.
-    if hudContainer then C_Timer.After(0, UpdateHUD) end
+    C_Timer.After(0, UpdateHUD)
+
+    -- One frame is not always enough. Swapping in another copy of an item you
+    -- are already wearing produces no durability event of its own -- the item id
+    -- did not change -- and the slot can keep reporting the old copy's figure
+    -- for a moment afterwards. Without these the counter would sit on the
+    -- previous item's durability until something else happened to refresh it.
+    if event == "UNIT_INVENTORY_CHANGED" then
+        C_Timer.After(0.2, UpdateHUD)
+        C_Timer.After(0.8, UpdateHUD)
+    end
 end)
 
 -- ── Public API ────────────────────────────────────────────────────────────────

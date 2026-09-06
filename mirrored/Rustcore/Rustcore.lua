@@ -44,6 +44,33 @@ local function EnsureProfile()
     return profile
 end
 
+-- The difficulty palette, indexed by tier. Shared rather than kept private to
+-- the options window, because the stats counters tint themselves from these same
+-- values and the two are supposed to match -- a second copy would drift the
+-- moment one of them was adjusted.
+Rustcore.DIFFICULTY_COLORS = {
+    [1] = { 0.494, 0.663, 0.337 }, -- Rusted
+    [2] = { 0.62,  0.58,  0.28  }, -- Broken
+    [3] = { 0.72,  0.43,  0.19  }, -- Shattered
+    [4] = { 0.62,  0.22,  0.16  }, -- Crumbling
+    [5] = { 0.52,  0.07,  0.06  }, -- Dust
+}
+
+-- The same five hues turned up for small text on dark art.
+--
+-- The palette above is deliberately earthy, which suits the big difficulty title
+-- but leaves three-digit counter numerals hard to read against the dark counter
+-- graphic. These keep each tier's hue exactly and raise only saturation and
+-- brightness, to roughly where the durability readout sits -- that one uses
+-- near-primary colours at 0.85 saturation, and stays legible at a glance.
+Rustcore.DIFFICULTY_COLORS_VIVID = {
+    [1] = { 0.51, 0.92, 0.14 }, -- Rusted
+    [2] = { 0.94, 0.85, 0.14 }, -- Broken
+    [3] = { 0.97, 0.50, 0.12 }, -- Shattered
+    [4] = { 0.95, 0.25, 0.14 }, -- Crumbling
+    [5] = { 0.93, 0.13, 0.11 }, -- Dust
+}
+
 local defaults = {
     difficulty      = 2,     -- 1=Lite, 2=Normal, 3=Hard, 4=Brutal, 5=Extreme
     selfFound       = false, -- block mailbox / AH / trade
@@ -66,7 +93,15 @@ local defaults = {
     statsBackgroundOpacity = 0.78, -- opacity of the stats window background art
     statsBackgroundShadow = 0.78, -- opacity of the solid black plane behind the background art
     statsHorizontalLayout = false, -- arrange all stats window elements on a single row
-    dragonPlayerFrame = false, -- show a difficulty-tier dragon overlay on your own player frame
+    -- Which counters the stats window shows. Broken, Rusted and the best item
+    -- lost are the original three and stay on; deaths is new and stays off until
+    -- asked for, so an existing window does not change shape on update.
+    statShowBroken  = true,  -- show the Broken (items destroyed) counter
+    statShowRusted  = true,  -- show the Rusted (items worn out) counter
+    statShowDeaths  = false, -- show the Deaths counter
+    statShowBestItem = true, -- show the best item lost panel
+    statsColoredNumbers = true, -- tint each stats counter with its matching difficulty colour
+    dragonPlayerFrame = true, -- show a difficulty-tier dragon overlay on your own player frame
     dragonTargetFrame = true,  -- show a difficulty-tier dragon overlay on the target frame when targeting a Rustcore user
     showDeathlogWindow = false, -- show the death log window listing other players' deaths
     showDeathlogLevel = true,   -- show the victim's level in each death log entry
@@ -389,7 +424,15 @@ function Rustcore.SetSetting(key, value)
         RustcoreDeathlog.RefreshBackgroundShadow()
     elseif key == "deathlogFontSize" and RustcoreDeathlog and RustcoreDeathlog.RefreshFontSize then
         RustcoreDeathlog.RefreshFontSize()
-    elseif key == "statsHorizontalLayout" and RustcoreStats then
+    elseif key == "statsColoredNumbers" and RustcoreStats and RustcoreStats.Refresh then
+        -- Colour only: the digits are re-tinted in place, nothing moves.
+        RustcoreStats.Refresh()
+    elseif (key == "statsHorizontalLayout"
+            or key == "statShowRusted" or key == "statShowBroken"
+            or key == "statShowDeaths" or key == "statShowBestItem")
+            and RustcoreStats then
+        -- Turning a counter on or off changes how many cells the row has, so
+        -- the window has to be re-measured, not just repainted.
         if RustcoreStats.ApplyLayoutModeChange then
             RustcoreStats.ApplyLayoutModeChange()
         elseif RustcoreStats.RefreshLayout then
@@ -629,6 +672,12 @@ end
 -- verification is told what happened rather than what the options say
 -- (plan section 9). Wrapped so a verification fault can never break a death.
 local function NotifyVerificationDeath(penaltyApplied, markedCount)
+    -- Every death path funnels through here, so it is also where the stats
+    -- counter is bumped -- including the paths where an exception cancelled the
+    -- penalty, since the character still died.
+    if RustcoreStats and RustcoreStats.RegisterDeath then
+        pcall(RustcoreStats.RegisterDeath)
+    end
     if not (RustcoreVerification and RustcoreVerification.Difficulty) then return end
     local ok, err = pcall(RustcoreVerification.Difficulty.OnDeath, {
         tier = Rustcore.GetSetting("difficulty"),

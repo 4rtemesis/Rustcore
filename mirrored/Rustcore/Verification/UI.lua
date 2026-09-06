@@ -24,27 +24,24 @@ local BODY_FONT_PATH = Rustcore.GetAssetPath("Font/BPpong.otf")
 
 -- Colour and wording per status. The word is what the player reads first, so it
 -- says what Rustcore can vouch for rather than what the player may have done.
+-- The status word carries the outlook by itself, so there is no second line
+-- spelling it out. Two rules make that work, and the colours follow them:
+--
+--   red    the run is over. Only ever used where nothing will bring it back.
+--   blue   not certified yet, but still reachable by playing on.
+--
+-- UNVERIFIED therefore reads as the final "Not verified", and anything Rustcore
+-- merely needs more time for is Uncertain instead -- which is why a suspension
+-- and a late start share that word: from the player's side they are the same
+-- situation, and the difference between them is Rustcore's business.
 local STATUS_LOOK = {
     VERIFIED   = { 0.35, 0.9,  0.35, "Verified",     "Rustcore has detected no rule violations." },
     WARNING    = { 1.0,  0.82, 0.2,  "Verified",     "Something unexplained was noted. Certification still stands." },
-    SUSPENDED  = { 0.55, 0.75, 0.95, "Paused",       "Not certified right now, but nothing is wrong. Keep playing and it comes back." },
-    UNCERTAIN  = { 0.7,  0.7,  0.75, "Pending",      "Still being observed. Not certified yet." },
-    UNVERIFIED = { 0.75, 0.55, 0.3,  "Not verified", "Rustcore cannot establish enough continuity to certify this." },
-    FAILED     = { 0.9,  0.3,  0.3,  "Disqualified", "This run can no longer be certified." },
+    SUSPENDED  = { 0.55, 0.75, 0.95, "Uncertain",    "Not certified yet. Keep playing and it will be." },
+    UNCERTAIN  = { 0.55, 0.75, 0.95, "Uncertain",    "Still being observed. Keep playing to earn certification." },
+    UNVERIFIED = { 0.9,  0.3,  0.3,  "Not verified", "This run can no longer be certified." },
+    FAILED     = { 0.9,  0.3,  0.3,  "Not verified", "This run can no longer be certified." },
 }
-
--- The line the player most wants: can this still be fixed, or is it over?
--- Kept separate from the status wording above because it is the one thing that
--- should never be ambiguous.
-local function OutlookText(status)
-    if status == "VERIFIED" or status == "WARNING" then
-        return "This run is certified.", 0.5, 0.85, 0.5
-    end
-    if V.IsRecoverable(status) then
-        return "This run is not disqualified. Playing on will restore it.", 0.55, 0.8, 0.95
-    end
-    return "This run has been disqualified and cannot be certified again.", 0.9, 0.45, 0.4
-end
 
 local function Look(status)
     return STATUS_LOOK[status or ""] or STATUS_LOOK.UNVERIFIED
@@ -153,13 +150,9 @@ function UI.BuildPage(page)
     widgets.dNote:SetWidth(WIDTH)
     widgets.dNote:SetWordWrap(true)
 
-    widgets.dOutlook = MakeText(content, 13)
-    widgets.dOutlook:SetPoint("TOPLEFT", widgets.dNote, "BOTTOMLEFT", 0, -4)
-    widgets.dOutlook:SetWidth(WIDTH)
-    widgets.dOutlook:SetWordWrap(true)
 
     widgets.dDetail = MakeText(content, 13, 0.85, 0.85, 0.85)
-    widgets.dDetail:SetPoint("TOPLEFT", widgets.dOutlook, "BOTTOMLEFT", 0, -8)
+    widgets.dDetail:SetPoint("TOPLEFT", widgets.dNote, "BOTTOMLEFT", 0, -8)
     widgets.dDetail:SetWidth(WIDTH)
     widgets.dDetail:SetWordWrap(true)
 
@@ -189,13 +182,9 @@ function UI.BuildPage(page)
     widgets.sNote:SetWidth(WIDTH)
     widgets.sNote:SetWordWrap(true)
 
-    widgets.sOutlook = MakeText(content, 13)
-    widgets.sOutlook:SetPoint("TOPLEFT", widgets.sNote, "BOTTOMLEFT", 0, -4)
-    widgets.sOutlook:SetWidth(WIDTH)
-    widgets.sOutlook:SetWordWrap(true)
 
     widgets.sDetail = MakeText(content, 13, 0.85, 0.85, 0.85)
-    widgets.sDetail:SetPoint("TOPLEFT", widgets.sOutlook, "BOTTOMLEFT", 0, -8)
+    widgets.sDetail:SetPoint("TOPLEFT", widgets.sNote, "BOTTOMLEFT", 0, -8)
     widgets.sDetail:SetWidth(WIDTH)
     widgets.sDetail:SetWordWrap(true)
 
@@ -316,11 +305,9 @@ function UI.BuildPage(page)
             widgets.dTier:SetTextColor(0.7, 0.7, 0.7)
             widgets.dStatus:SetText("")
             widgets.dNote:SetText("Rustcore has not started tracking this character yet.")
-            widgets.dOutlook:SetText("")
             widgets.dDetail:SetText("")
             widgets.sStatus:SetText("")
             widgets.sNote:SetText("")
-            widgets.sOutlook:SetText("")
             widgets.sDetail:SetText("")
             widgets.bar:SetFraction(0)
             widgets.cDetail:SetText("")
@@ -345,9 +332,6 @@ function UI.BuildPage(page)
         widgets.dStatus:SetTextColor(dLook[1], dLook[2], dLook[3])
         widgets.dNote:SetText(dLook[5])
 
-        local dText, dr, dg, db = OutlookText(difficulty.status)
-        widgets.dOutlook:SetText(dText)
-        widgets.dOutlook:SetTextColor(dr, dg, db)
 
         local dLines = {}
         local selected = V.GetCurrentTier()
@@ -387,31 +371,28 @@ function UI.BuildPage(page)
             widgets.sStatus:SetText("Not enabled")
             widgets.sStatus:SetTextColor(0.6, 0.6, 0.6)
             widgets.sNote:SetText("Turn on Self-Found under Gameplay to start a certified run.")
-            widgets.sOutlook:SetText("")
             widgets.sDetail:SetText("")
         else
             local sLook = Look(selfFound.status)
             widgets.sStatus:SetText(sLook[4])
             widgets.sStatus:SetTextColor(sLook[1], sLook[2], sLook[3])
-            widgets.sNote:SetText(sLook[5])
 
-            local sText, sr, sg, sb = OutlookText(selfFound.status)
             -- A suspension can say something more useful than "keep playing":
-            -- exactly what is standing in the way, and how much longer.
+            -- how much longer, or what is standing in the way. Folded into the
+            -- status note rather than given a line of its own.
+            local sNote = sLook[5]
             if selfFound.status == V.STATUS.SUSPENDED and V.SelfFound and V.SelfFound.EvaluateRestore then
                 local ok, why, remaining = V.SelfFound.EvaluateRestore()
                 if ok then
-                    sText = "Ready to be restored."
+                    sNote = "Ready to be certified again."
                 elseif remaining then
-                    sText = string.format(
-                        "Not disqualified. About %s more clean play restores it.",
+                    sNote = string.format("About %s more clean play and this is certified again.",
                         FormatDuration(remaining))
                 elseif why then
-                    sText = "Not disqualified, but held back: " .. why .. "."
+                    sNote = "Held back: " .. why .. "."
                 end
             end
-            widgets.sOutlook:SetText(sText)
-            widgets.sOutlook:SetTextColor(sr, sg, sb)
+            widgets.sNote:SetText(sNote)
 
             local enforcing = V.SelfFoundRestrict and V.SelfFoundRestrict.IsEnforcing
                 and V.SelfFoundRestrict.IsEnforcing()

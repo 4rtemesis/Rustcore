@@ -25,6 +25,11 @@ local HORIZONTAL_SIDE_PAD = 20
 local BEST_ITEM_SIDE_PAD = 16
 local COLUMN_GAP = 4
 local ROW_GAP = 2
+-- Pulls the second row up in the two-row layout. Kept separate from ROW_GAP
+-- because ROW_GAP also feeds the row-height split -- changing that resizes the
+-- graphics, whereas the gap being closed here is just the slack left over when
+-- the counter art does not fill its share of the height.
+local ROW_TIGHTEN = 6
 local BEST_CELL_RATIO = 1.8
 local COUNTER_REF_WIDTH, COUNTER_REF_HEIGHT = 229, 103
 local COUNTER_DIGIT_SPACING = 0.235
@@ -50,7 +55,14 @@ local function FormatCounterValue(value)
     return string.format("%03d", value)
 end
 
-local function SetCounterDigit(slot, value)
+local function SetCounterDigit(slot, value, color)
+    -- Applied to both texts every time rather than only on change: the rolling
+    -- animation swaps which of the pair is visible, so tinting just one would
+    -- leave the other showing the previous colour when the mode is toggled.
+    local r, g, b = color[1], color[2], color[3]
+    slot.oldText:SetTextColor(r, g, b)
+    slot.newText:SetTextColor(r, g, b)
+
     if slot.currentValue == nil then
         slot.currentValue = value
         slot.oldText:SetText(value)
@@ -93,10 +105,11 @@ local function SetCounterDigit(slot, value)
     end)
 end
 
-local function SetCounterDigits(digits, value)
+local function SetCounterDigits(digits, value, color)
     local text = FormatCounterValue(value)
+    color = color or COUNTER_VALUE_COLOR
     for i = 1, 3 do
-        SetCounterDigit(digits[i], text:sub(i, i))
+        SetCounterDigit(digits[i], text:sub(i, i), color)
     end
 end
 
@@ -107,6 +120,7 @@ local function EnsureStatsDB()
     local stats = RustcoreDB.characterStats[key]
     stats.destroyedItems = stats.destroyedItems or 0
     stats.rustedItems = stats.rustedItems or 0
+    stats.deaths = stats.deaths or 0
     stats.bestItemLostLink = stats.bestItemLostLink or nil
     stats.bestItemLostIlvl = stats.bestItemLostIlvl or 0
     stats.zeroDurabilitySlots = stats.zeroDurabilitySlots or {}
@@ -114,11 +128,74 @@ local function EnsureStatsDB()
     return stats
 end
 
+-- Every counter the panel can show, in the left-to-right order they appear.
+-- Adding one is a matter of appending a row here plus a matching setting: the
+-- layout below sizes and places whatever is switched on rather than assuming a
+-- fixed pair.
+-- `colorTier` indexes Rustcore.DIFFICULTY_COLORS. The mapping is by how severe
+-- each counter reads rather than by matching names: rusting is the mildest thing
+-- that happens to your gear so it takes the Rusted green, an item destroyed
+-- outright is a step past that and takes Shattered's orange, and a death takes
+-- Crumbling's red. Note that the Broken counter is deliberately *not* the Broken
+-- tier colour, which would be too close to the green beside it to tell apart.
+local ALL_COUNTERS = {
+    {
+        key = "rusted", setting = "statShowRusted", label = "Rusted", colorTier = 1,
+        labelKey = "rustedLabel", counterKey = "rustedCounter", digitsKey = "rustedDigits",
+        value = function(stats) return stats.rustedItems or 0 end,
+    },
+    {
+        key = "broken", setting = "statShowBroken", label = "Broken", colorTier = 3,
+        labelKey = "destroyedLabel", counterKey = "destroyedCounter", digitsKey = "destroyedDigits",
+        value = function(stats) return stats.destroyedItems or 0 end,
+    },
+    {
+        key = "deaths", setting = "statShowDeaths", label = "Deaths", colorTier = 4,
+        labelKey = "deathsLabel", counterKey = "deathsCounter", digitsKey = "deathsDigits",
+        value = function(stats) return stats.deaths or 0 end,
+    },
+}
+
+-- The tint a counter's digits should use right now: its difficulty colour while
+-- coloured numbers are on, otherwise the plain parchment tone they all shared
+-- before.
+local function CounterColor(counter)
+    if Rustcore.GetSetting("statsColoredNumbers") == false then
+        return COUNTER_VALUE_COLOR
+    end
+    -- The vivid palette, not the one the difficulty title uses: same hues, but
+    -- these numerals are small and sit on dark art, where the earthy originals
+    -- were hard to read.
+    local palette = Rustcore.DIFFICULTY_COLORS_VIVID or Rustcore.DIFFICULTY_COLORS
+    return (palette and palette[counter.colorTier]) or COUNTER_VALUE_COLOR
+end
+
+local function VisibleCounters()
+    local visible = {}
+    for _, counter in ipairs(ALL_COUNTERS) do
+        -- Deaths is the only one defaulting off, so it needs the explicit
+        -- comparison; the rest are on unless switched off.
+        local on
+        if counter.setting == "statShowDeaths" then
+            on = Rustcore.GetSetting(counter.setting) == true
+        else
+            on = Rustcore.GetSetting(counter.setting) ~= false
+        end
+        if on then visible[#visible + 1] = counter end
+    end
+    return visible
+end
+
+-- Which counters are on. Each is now a plain setting the player controls, rather
+-- than being inferred from difficulty and the repair option: a panel that
+-- rearranged itself when an unrelated setting changed was surprising, and there
+-- was no way to turn a counter off once it had a value.
 local function GetCounterVisibility()
-    local stats = EnsureStatsDB()
-    local showRusted = (stats.rustedItems or 0) > 0 or not Rustcore.GetSetting("allowRepair")
-    local showDestroyed = (stats.destroyedItems or 0) > 0 or Rustcore.GetSetting("difficulty") ~= 1
-    return showRusted, showDestroyed
+    local showRusted    = Rustcore.GetSetting("statShowRusted") ~= false
+    local showDestroyed = Rustcore.GetSetting("statShowBroken") ~= false
+    local showDeaths    = Rustcore.GetSetting("statShowDeaths") == true
+    local showBest      = Rustcore.GetSetting("statShowBestItem") ~= false
+    return showRusted, showDestroyed, showDeaths, showBest
 end
 
 local function GetItemIlvl(item)
@@ -139,10 +216,11 @@ end
 local function RefreshText()
     if not statsFrame then return end
     local stats = EnsureStatsDB()
-    statsFrame.destroyedLabel:SetText("Broken")
-    SetCounterDigits(statsFrame.destroyedDigits, stats.destroyedItems)
-    statsFrame.rustedLabel:SetText("Rusted")
-    SetCounterDigits(statsFrame.rustedDigits, stats.rustedItems)
+    for _, counter in ipairs(ALL_COUNTERS) do
+        statsFrame[counter.labelKey]:SetText(counter.label)
+        SetCounterDigits(statsFrame[counter.digitsKey], counter.value(stats),
+            CounterColor(counter))
+    end
     statsFrame.bestLabel:SetText("Best item lost")
     statsFrame.bestValue:SetText(stats.bestItemLostLink or "None")
     if stats.bestItemLostLink then
@@ -258,8 +336,9 @@ function RustcoreStats.RefreshLayout()
     local bestContentWidth = math.max(1, width - (bestSidePad * 2))
     local contentHeight = math.max(1, height - (pad * 2))
     local rowHeight = horizontal and contentHeight or ((contentHeight - ROW_GAP) / 2)
-    local showRusted, showDestroyed = GetCounterVisibility()
-    local visibleCounterCount = (showRusted and 1 or 0) + (showDestroyed and 1 or 0)
+    local visible = VisibleCounters()
+    local visibleCounterCount = #visible
+    local showBest = select(4, GetCounterVisibility())
     local elementGap = 2
     local counterCellWidth
     local bestCellWidth = bestContentWidth
@@ -274,23 +353,26 @@ function RustcoreStats.RefreshLayout()
         -- shared height by its own aspect ratio.
         labelSize = Clamp(math.floor(contentHeight * 0.16) + 1, 11, 16)
         bestLabelSize = labelSize
-        local slotCount = visibleCounterCount + 1
+        local slotCount = visibleCounterCount + (showBest and 1 or 0)
         local gaps = math.max(0, slotCount - 1) * COLUMN_GAP
         local counterAspect = COUNTER_REF_WIDTH / COUNTER_REF_HEIGHT
         local itemAspect = ITEM_FRAME_REF_WIDTH / ITEM_FRAME_REF_HEIGHT
-        local aspectSum = (visibleCounterCount * counterAspect) + itemAspect
+        local aspectSum = (visibleCounterCount * counterAspect) + (showBest and itemAspect or 0)
         local heightFromContent = math.max(1, contentHeight - labelSize - elementGap)
         local heightFromWidth = (contentWidth - gaps) / math.max(aspectSum, 0.001)
         graphicHeight = math.max(1, math.min(heightFromContent, heightFromWidth))
 
         counterCellWidth = graphicHeight * counterAspect
         bestCellWidth = graphicHeight * itemAspect
-        horizontalRowWidth = (visibleCounterCount * counterCellWidth) + bestCellWidth + gaps
+        horizontalRowWidth = (visibleCounterCount * counterCellWidth)
+            + (showBest and bestCellWidth or 0) + gaps
     else
         labelSize = Clamp(math.floor(rowHeight * 0.17) + 1, 12, 18)
         bestLabelSize = Clamp(math.floor(rowHeight * 0.19), 11, 17)
-        if visibleCounterCount == 2 then
-            counterCellWidth = (contentWidth - COLUMN_GAP) / 2
+        if visibleCounterCount > 1 then
+            -- Counters share the row evenly, however many are on.
+            counterCellWidth = (contentWidth - (COLUMN_GAP * (visibleCounterCount - 1)))
+                / visibleCounterCount
         else
             counterCellWidth = contentWidth
         end
@@ -307,21 +389,25 @@ function RustcoreStats.RefreshLayout()
     local bestFrameHeight = bestFrameWidth * (ITEM_FRAME_REF_HEIGHT / ITEM_FRAME_REF_WIDTH)
     local bestValueSize = Clamp(math.floor(bestFrameHeight * 0.22) + 2, 12, 20)
 
-    ApplyBodyFont(statsFrame.destroyedLabel, labelSize)
-    ApplyBodyFont(statsFrame.rustedLabel, labelSize)
+    -- Driven off the counter table rather than named one by one, which is how
+    -- the deaths label ended up at the default size while the other two were
+    -- scaled: adding a counter meant remembering to add a line here too.
+    for _, counter in ipairs(ALL_COUNTERS) do
+        ApplyBodyFont(statsFrame[counter.labelKey], labelSize)
+    end
     ApplyBodyFont(statsFrame.bestLabel, bestLabelSize)
     ApplyBodyFont(statsFrame.bestValue, bestValueSize)
-    for i = 1, 3 do
-        ApplyBodyFont(statsFrame.rustedDigits[i].oldText, digitSize)
-        ApplyBodyFont(statsFrame.rustedDigits[i].newText, digitSize)
-        ApplyBodyFont(statsFrame.destroyedDigits[i].oldText, digitSize)
-        ApplyBodyFont(statsFrame.destroyedDigits[i].newText, digitSize)
+    for _, counter in ipairs(ALL_COUNTERS) do
+        local digits = statsFrame[counter.digitsKey]
+        for i = 1, 3 do
+            ApplyBodyFont(digits[i].oldText, digitSize)
+            ApplyBodyFont(digits[i].newText, digitSize)
+        end
     end
 
     local topY = -pad
-    local bottomY = horizontal and topY or (-pad - rowHeight - ROW_GAP)
-    local rustedCenterX
-    local destroyedCenterX
+    local bottomY = horizontal and topY or (-pad - rowHeight - ROW_GAP + ROW_TIGHTEN)
+    local centerXByKey = {}
     local bestCenterX = width * 0.5
     if horizontal then
         -- Center the whole row within contentWidth instead of left-packing
@@ -333,28 +419,33 @@ function RustcoreStats.RefreshLayout()
             cursor = cursor + w + COLUMN_GAP
             return centerX
         end
-        if showRusted then rustedCenterX = PlaceCell(counterCellWidth) end
-        if showDestroyed then destroyedCenterX = PlaceCell(counterCellWidth) end
-        bestCenterX = PlaceCell(bestCellWidth)
-    elseif visibleCounterCount == 2 then
-        rustedCenterX = sidePad + (counterCellWidth * 0.5)
-        destroyedCenterX = sidePad + counterCellWidth + COLUMN_GAP + (counterCellWidth * 0.5)
+        for _, counter in ipairs(visible) do
+            centerXByKey[counter.key] = PlaceCell(counterCellWidth)
+        end
+        if showBest then bestCenterX = PlaceCell(bestCellWidth) end
     elseif visibleCounterCount == 1 then
-        rustedCenterX = width * 0.5
-        destroyedCenterX = width * 0.5
+        centerXByKey[visible[1].key] = width * 0.5
+    elseif visibleCounterCount > 1 then
+        -- Evenly spaced across the content area, in declaration order.
+        local rowWidth = (counterCellWidth * visibleCounterCount)
+            + (COLUMN_GAP * (visibleCounterCount - 1))
+        local cursor = sidePad + math.max(0, (contentWidth - rowWidth) * 0.5)
+        for _, counter in ipairs(visible) do
+            centerXByKey[counter.key] = cursor + (counterCellWidth * 0.5)
+            cursor = cursor + counterCellWidth + COLUMN_GAP
+        end
     end
 
-    statsFrame.rustedLabel:ClearAllPoints()
-    statsFrame.rustedLabel:SetPoint("TOP", statsFrame, "TOPLEFT", rustedCenterX or (width * 0.5), topY)
-    statsFrame.rustedLabel:SetWidth(counterCellWidth)
-    statsFrame.rustedLabel:SetShown(showRusted)
-    statsFrame.rustedCounter:SetShown(showRusted)
-
-    statsFrame.destroyedLabel:ClearAllPoints()
-    statsFrame.destroyedLabel:SetPoint("TOP", statsFrame, "TOPLEFT", destroyedCenterX or (width * 0.5), topY)
-    statsFrame.destroyedLabel:SetWidth(counterCellWidth)
-    statsFrame.destroyedLabel:SetShown(showDestroyed)
-    statsFrame.destroyedCounter:SetShown(showDestroyed)
+    for _, counter in ipairs(ALL_COUNTERS) do
+        local label = statsFrame[counter.labelKey]
+        local frame = statsFrame[counter.counterKey]
+        local centerX = centerXByKey[counter.key]
+        label:ClearAllPoints()
+        label:SetPoint("TOP", statsFrame, "TOPLEFT", centerX or (width * 0.5), topY)
+        label:SetWidth(counterCellWidth)
+        label:SetShown(centerX ~= nil)
+        frame:SetShown(centerX ~= nil)
+    end
 
     local function PositionCounter(counter, digits, centerX)
         counter:SetSize(counterWidth, counterHeight)
@@ -385,12 +476,15 @@ function RustcoreStats.RefreshLayout()
         end
     end
 
-    if showRusted then
-        PositionCounter(statsFrame.rustedCounter, statsFrame.rustedDigits, rustedCenterX)
+    for _, counter in ipairs(visible) do
+        PositionCounter(statsFrame[counter.counterKey], statsFrame[counter.digitsKey],
+            centerXByKey[counter.key])
     end
-    if showDestroyed then
-        PositionCounter(statsFrame.destroyedCounter, statsFrame.destroyedDigits, destroyedCenterX)
-    end
+
+    statsFrame.bestLabel:SetShown(showBest)
+    statsFrame.itemLostFrame:SetShown(showBest)
+    statsFrame.bestValue:SetShown(showBest)
+    if not showBest then statsFrame.bestHitbox:Hide() end
 
     statsFrame.bestLabel:ClearAllPoints()
     statsFrame.bestLabel:SetPoint("TOP", statsFrame, "TOPLEFT", bestCenterX, bottomY)
@@ -415,34 +509,32 @@ local function GetAutoFitWidth()
     if not statsFrame then return DEFAULT_WIDTH end
     RustcoreStats.RefreshLayout()
 
-    local showRusted, showDestroyed = GetCounterVisibility()
-    local visibleCounterCount = (showRusted and 1 or 0) + (showDestroyed and 1 or 0)
-    local counterCellWidth = math.max(
-        68,
-        showRusted and (statsFrame.rustedLabel:GetStringWidth() or 0) or 0,
-        showDestroyed and (statsFrame.destroyedLabel:GetStringWidth() or 0) or 0
-    )
+    local visible = VisibleCounters()
+    local visibleCounterCount = #visible
+    local showBest = select(4, GetCounterVisibility())
 
-    local bestLabelWidth = statsFrame.bestLabel:GetStringWidth() or 0
-    local bestValueWidth = statsFrame.bestValue:GetStringWidth() or 0
-    local bottomWidth = math.max(140, bestLabelWidth, bestValueWidth / ITEM_LINK_WIDTH_RATIO)
+    local counterCellWidth = 68
+    for _, counter in ipairs(visible) do
+        local labelWidth = counter.label:GetStringWidth() or 0
+        if labelWidth > counterCellWidth then counterCellWidth = labelWidth end
+    end
+
+    local bestLabelWidth = showBest and (statsFrame.bestLabel:GetStringWidth() or 0) or 0
+    local bestValueWidth = showBest and (statsFrame.bestValue:GetStringWidth() or 0) or 0
+    local bottomWidth = showBest
+        and math.max(140, bestLabelWidth, bestValueWidth / ITEM_LINK_WIDTH_RATIO)
+        or 0
 
     if Rustcore.GetSetting("statsHorizontalLayout") then
-        local slotCount = visibleCounterCount + 1
+        local slotCount = visibleCounterCount + (showBest and 1 or 0)
         local totalWidth = (counterCellWidth * visibleCounterCount)
             + bottomWidth
             + (math.max(0, slotCount - 1) * COLUMN_GAP)
         return Clamp(math.ceil(totalWidth + (math.max(HORIZONTAL_SIDE_PAD, STATS_CONTENT_EDGE_PAD) * 2)), MIN_WIDTH, MAX_WIDTH)
     end
 
-    local topWidth
-    if visibleCounterCount == 2 then
-        topWidth = (counterCellWidth * 2) + COLUMN_GAP
-    elseif visibleCounterCount == 1 then
-        topWidth = counterCellWidth
-    else
-        topWidth = 0
-    end
+    local topWidth = (counterCellWidth * visibleCounterCount)
+        + (math.max(0, visibleCounterCount - 1) * COLUMN_GAP)
     local requiredTopWidth = topWidth + (math.max(TEXT_PAD, STATS_CONTENT_EDGE_PAD) * 2)
     local requiredBottomWidth = bottomWidth + (math.max(BEST_ITEM_SIDE_PAD, STATS_CONTENT_EDGE_PAD) * 2)
     return Clamp(math.ceil(math.max(requiredTopWidth, requiredBottomWidth)), MIN_WIDTH, MAX_WIDTH)
@@ -520,6 +612,7 @@ local function BuildStatsFrame()
 
     local destroyedLabel = CreateStatsText(LABEL_COLOR)
     local rustedLabel = CreateStatsText(LABEL_COLOR)
+    local deathsLabel = CreateStatsText(LABEL_COLOR)
     local bestLabel = CreateStatsText(LABEL_COLOR)
 
     local function CreateArtFrame(texturePath)
@@ -557,6 +650,7 @@ local function BuildStatsFrame()
 
     local rustedCounter, rustedDigits = CreateCounter()
     local destroyedCounter, destroyedDigits = CreateCounter()
+    local deathsCounter, deathsDigits = CreateCounter()
     local itemLostFrame = CreateArtFrame("UI/Lostitemframe Dark copy.tga")
     local bestValue = CreateStatsText(VALUE_COLOR, itemLostFrame)
 
@@ -656,6 +750,9 @@ local function BuildStatsFrame()
     f.destroyedDigits = destroyedDigits
     f.rustedCounter = rustedCounter
     f.rustedDigits = rustedDigits
+    f.deathsLabel = deathsLabel
+    f.deathsCounter = deathsCounter
+    f.deathsDigits = deathsDigits
     f.bestLabel = bestLabel
     f.bestValue = bestValue
     f.itemLostFrame = itemLostFrame
@@ -692,6 +789,13 @@ function RustcoreStats.ApplyVisibility()
     end
 end
 
+-- Re-read every counter from the saved data and repaint. Used when something
+-- outside this file changed what the numbers or their colours should be -- a
+-- coloured-numbers toggle, or a verification import replacing the stats.
+function RustcoreStats.Refresh()
+    RefreshText()
+end
+
 function RustcoreStats.RefreshStyle()
     RustcoreStats.RefreshBackgroundOpacity()
 end
@@ -713,6 +817,14 @@ function RustcoreStats.RefreshBackgroundShadow()
     for _, piece in pairs(statsFrame.backgroundShadowPieces or {}) do
         piece:SetAlpha(opacity)
     end
+end
+
+-- Counts every death, including one an exception spared from its penalty: the
+-- counter reports how often this character died, not how often it cost anything.
+function RustcoreStats.RegisterDeath()
+    local stats = EnsureStatsDB()
+    stats.deaths = (stats.deaths or 0) + 1
+    RefreshText()
 end
 
 function RustcoreStats.RegisterDestroyedItem(item)
