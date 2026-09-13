@@ -95,9 +95,8 @@ local defaults = {
     durHUDBackground = false,   -- draw the rivet panel behind the durability counters
     durHUDBackgroundOpacity = 0.78, -- opacity of the durability HUD background art
     durHUDBackgroundShadow = 0.78,  -- opacity of the solid black plane behind that art
-    -- One "Durability" heading across the top of the HUD. Deliberately not one
-    -- per counter, unlike the stats window: every row here counts the same
-    -- thing, so a label on each would repeat itself eleven times over.
+    -- Headings on the durability HUD: one "Durability" heading across the top of
+    -- a vertical stack, or each counter's slot name above it in a horizontal row.
     durHUDShowTitle = false,
     statsBackground = true,        -- draw the rivet panel behind the stats window
     statsBackgroundOpacity = 0.78, -- opacity of the stats window background art
@@ -122,8 +121,11 @@ local defaults = {
     -- Item icons beside each stats counter. Off falls back to the standalone
     -- counter graphic the window used before the icons arrived.
     statsShowIcons = true,
+    -- The best item as the long named frame on a row of its own instead of a
+    -- counter; in the vertical layout the other counters go into two columns.
+    statsLongItemName = false,
     dragonPlayerFrame = true, -- show a difficulty-tier dragon overlay on your own player frame
-    dragonTargetFrame = true,  -- show a difficulty-tier dragon overlay on the target frame when targeting a Rustcore user
+    dragonTargetFrame = true,  -- "Target Frame Verification": the target's difficulty dragon and their Self-Found icon, together
     showDeathlogWindow = false, -- show the death log window listing other players' deaths
     showDeathlogLevel = true,   -- show the victim's level in each death log entry
     showDeathlogCount = true,   -- show how many items were lost
@@ -447,8 +449,15 @@ function Rustcore.SetSetting(key, value)
         RustcoreStats.RefreshBackgroundShadow()
     elseif key == "dragonPlayerFrame" and RustcoreDragon and RustcoreDragon.RefreshPlayerFrame then
         RustcoreDragon.RefreshPlayerFrame()
-    elseif key == "dragonTargetFrame" and RustcoreDragon and RustcoreDragon.RefreshTargetFrame then
-        RustcoreDragon.RefreshTargetFrame()
+    elseif key == "dragonTargetFrame" then
+        -- One setting for everything drawn on the target frame: the dragon and
+        -- the target's Self-Found icon come and go together.
+        if RustcoreDragon and RustcoreDragon.RefreshTargetFrame then
+            RustcoreDragon.RefreshTargetFrame()
+        end
+        if RustcoreSelfFoundBuff and RustcoreSelfFoundBuff.RefreshTarget then
+            RustcoreSelfFoundBuff.RefreshTarget()
+        end
     elseif key == "deathlogBackgroundOpacity" and RustcoreDeathlog and RustcoreDeathlog.RefreshBackgroundOpacity then
         RustcoreDeathlog.RefreshBackgroundOpacity()
     elseif key == "deathlogBackgroundShadow" and RustcoreDeathlog and RustcoreDeathlog.RefreshBackgroundShadow then
@@ -459,7 +468,7 @@ function Rustcore.SetSetting(key, value)
         -- Colour only: the digits are re-tinted in place, nothing moves.
         RustcoreStats.Refresh()
     elseif (key == "statsHorizontalLayout" or key == "statsShowTitles"
-            or key == "statsShowIcons"
+            or key == "statsShowIcons" or key == "statsLongItemName"
             or key == "statShowRusted" or key == "statShowBroken"
             or key == "statShowDeaths" or key == "statShowBestItem")
             and RustcoreStats then

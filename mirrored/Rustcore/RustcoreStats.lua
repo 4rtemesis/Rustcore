@@ -57,7 +57,13 @@ local ICON_ROW = {
     -- Per-digit pixel nudge: { hundreds, tens, ones }.
     digitNudge = { -5, -2, 1 },
     slotWidth = 16,
-    nameCenterX = 66,
+    -- The best-item name's box, in row pixels from the left edge. Here it is
+    -- the span the three digit slots cover: the art right of the icon cutout
+    -- is drawn for exactly that much.
+    nameLeft = 38,
+    nameWidth = 56,
+    nameHeight = 17,
+    nameFontSize = 10,
     hasIcon = true,
 }
 local PLAIN_ROW = {
@@ -69,25 +75,44 @@ local PLAIN_ROW = {
     digitSpacing = 0.235,
     digitNudge = { -3, 0, 2 },
     slotWidth = 15,
-    nameCenterX = 42,
+    -- With no icon the whole counter window is free, so the name takes all of
+    -- it rather than the digits' share: wider on both sides and taller, at a
+    -- larger size to fill the extra height. Measured from the art itself: its
+    -- dark inner window runs from about x=9 to x=74 and y=6 to y=30 at this
+    -- size, which puts the window's middle one pixel above the row's centre.
+    nameLeft = 9,
+    nameWidth = 65,
+    nameHeight = 22,
+    nameYOffset = 1,
+    nameFontSize = 12,
     hasIcon = false,
 }
 
--- The best-item row puts a name where the others put three digits. The area is
--- the span the digit slots occupy, so the name sits in the same window the
--- counter art was drawn around -- which comes out at much the same width in
--- both variants, wide digits in a narrow counter versus the reverse.
-local NAME_AREA_W = 56
-local NAME_FONT_SIZE = 11
--- A plate behind the name, because an item name is far more glyphs than the
--- three numerals this window was drawn for and the counter art's own texture
--- shows through between them.
+-- The best-item row puts an item name where the others put three digits. A name
+-- that fits is centred. One that does not is pinned to the box's left edge and
+-- cut off at the right: the start of a name is what identifies it, and a hard
+-- cut keeps every letter at one legible size, where shrinking long names to fit
+-- left them unreadable. The name is set a size smaller than it first was, so
+-- more of it fits before that cut.
+--
+-- A plate sits behind the name, because an item name is far more glyphs than
+-- the three numerals the window was drawn for and the art's own texture shows
+-- through between them. It is sized to the text with NAME_BACKDROP_PAD either
+-- side, until the text outgrows the box and the plate fills it.
 local NAME_BACKDROP_PAD = 3
 local NAME_BACKDROP_COLOR = { 0, 0, 0, 0.62 }
--- Item names are far longer than the three characters this window was drawn
--- for, so the name shrinks to fit rather than being cut -- down to this size,
--- past which it would be unreadable anyway and the tail is clipped instead.
-local NAME_MIN_FONT_SIZE = 7
+
+-- The long best-item frame: the named panel the stats window showed before the
+-- counters had icons, used in place of the best-item counter when
+-- statsLongItemName is on. It gets a row of its own, as wide as two counter
+-- columns, so in the vertical layout it sits flush under a two-column grid.
+local LONG_ITEM_ART = "UI/Lostitemframe Dark copy.tga"
+-- The art is 846x190.
+local LONG_ITEM_ASPECT = 846 / 190
+-- Its dark inner window runs from about 5% to 95% across, measured from the
+-- image, so the name is held inside the middle 84% and shortened past that.
+local LONG_ITEM_TEXT_WIDTH_RATIO = 0.84
+local LONG_ITEM_FONT_SIZE = 14
 
 -- Optional heading above each row. The band is reserved in the row's own
 -- coordinates so it scales with everything else, and costs nothing at all when
@@ -95,20 +120,28 @@ local NAME_MIN_FONT_SIZE = 7
 local TITLE_FONT_SIZE = 11
 local TITLE_BAND_H = 14
 local TITLE_COLOR = { 1, 0.82, 0 }
--- Matches the difficulty title's shadow rather than the one-pixel drop the
--- counter digits use: these sit over the panel art rather than over a counter
--- graphic, and a single pixel of black was not enough to lift them off it.
-local TITLE_SHADOW_OFFSET = 2
+-- The heading's shadow is a black copy of the text drawn underneath, offset by
+-- this much, because native font shadows don't render on this client. One
+-- pixel at full black, like the popup and the death notification; the only
+-- difference is those use 0.75, which at this small a size read as no shadow.
+local TITLE_SHADOW_OFFSET = 1
+local TITLE_SHADOW_ALPHA = 1
 
 -- The cracked frame the deletion wheel puts on doomed gear, at the ratio it
 -- uses there (36 around a 32px icon).
 local BROKEN_OVERLAY_SIZE = 27
+-- The overlay is drained of colour and then multiplied by this, which turns it a
+-- mid-light grey. Desaturating first is what makes it grey rather than just a
+-- darker version of its own colours; the multiplier is kept high so it reads as
+-- weathered metal rather than a shadow over the icon.
+local BROKEN_OVERLAY_GREY = 0.78
 -- Default shade laid over an icon so it reads as sitting inside the frame
 -- rather than pasted on top. Counters can override it either way.
 local ICON_SHADE_ALPHA = 0.20
 
--- Four rows in a column at native scale, plus the panel margins.
-local DEFAULT_WIDTH, DEFAULT_HEIGHT = 146, 178
+-- Four rows in a column at native scale, plus the panel margins (18 left, 12
+-- right -- see STATS_RIGHT_PAD_TRIM).
+local DEFAULT_WIDTH, DEFAULT_HEIGHT = 140, 178
 -- A single column of fixed-width rows needs far less room than the old
 -- label-and-panel layout did, and that layout's floor was what stopped the
 -- window being pulled in narrow beside the rest of the UI.
@@ -232,27 +265,34 @@ local function ItemDisplayName(link)
     return (GetItemInfo(link)) or link:match("|h%[(.-)%]|h")
 end
 
--- Fit a name into the counter window by shrinking the font until it does. One
--- measure-and-scale pass is enough: string width tracks font size closely
--- enough that a second would move it by less than a pixel.
+-- Put a name in a row's name box. The font size is fixed per variant at build
+-- time. A name that fits is centred; one that does not is pinned left so its
+-- start stays readable, and runs on past the right edge where the box's
+-- clipping cuts it.
 local function SetCounterName(row, text, color)
     local fontString = row and row.name
     if not fontString then return end
-    fontString:SetFont(BODY_FONT_PATH, NAME_FONT_SIZE, "")
     fontString:SetText(text or "")
     fontString:SetTextColor(color[1], color[2], color[3])
 
-    local width = fontString:GetStringWidth() or 0
-    if width > NAME_AREA_W and width > 0 then
-        local fitted = math.floor(NAME_FONT_SIZE * (NAME_AREA_W / width))
-        fontString:SetFont(BODY_FONT_PATH, math.max(NAME_MIN_FONT_SIZE, fitted), "")
-        width = fontString:GetStringWidth() or width
+    local host = fontString:GetParent()
+    local width = math.max(1, fontString:GetStringWidth() or 0)
+    local fits = (width + (NAME_BACKDROP_PAD * 2)) <= row.nameBoxWidth
+
+    fontString:ClearAllPoints()
+    if fits then
+        fontString:SetPoint("CENTER", host, "CENTER", 0, 0)
+    else
+        fontString:SetPoint("LEFT", host, "LEFT", NAME_BACKDROP_PAD, 0)
     end
 
-    -- The plate is sized to the text, not to the window, so a short name gets a
-    -- small plate rather than a black bar with a word floating in it.
+    -- The plate follows the text rather than the box, so a short name gets a
+    -- small plate instead of a black bar with a word in the middle of it. A
+    -- name that outgrows the box gets the whole box.
     if row.nameBg then
-        row.nameBg:SetWidth(math.min(NAME_AREA_W, math.max(1, width) + (NAME_BACKDROP_PAD * 2)))
+        row.nameBg:ClearAllPoints()
+        row.nameBg:SetPoint("CENTER", host, "CENTER", 0, 0)
+        row.nameBg:SetWidth(fits and (width + (NAME_BACKDROP_PAD * 2)) or row.nameBoxWidth)
     end
 end
 
@@ -428,6 +468,18 @@ local function FillRow(counter, row, stats)
     end
 end
 
+-- The long best-item frame: the item's full name, coloured by quality, with the
+-- item itself behind its tooltip.
+local function FillLongRow(stats)
+    local longRow = statsFrame and statsFrame.longItemRow
+    if not longRow then return end
+    local link = stats.bestItemLostLink
+    local color = ItemRarityColor(link)
+    longRow.itemLink = link
+    longRow.name:SetText(ItemDisplayName(link) or "--")
+    longRow.name:SetTextColor(color[1], color[2], color[3])
+end
+
 local function RefreshText()
     if not statsFrame then return end
     local stats = EnsureStatsDB()
@@ -438,6 +490,7 @@ local function RefreshText()
             FillRow(counter, pair.plain, stats)
         end
     end
+    FillLongRow(stats)
     RustcoreStats.RefreshLayout()
 end
 
@@ -492,10 +545,20 @@ end
 -- item -- which were sized to keep graphics off the border art. With no border
 -- there is nothing to keep them off, and those floors were the whole reason a
 -- panel-less window still sat inside a visible margin.
-local function ContentSidePad(horizontal)
+--
+-- Left and right are not the same. The counter art carries its own empty margin
+-- down its right-hand side, so an equal pad each side reads as a wider gap on
+-- the right than the left. The right pad is trimmed to cancel that out -- the
+-- same fix the durability HUD makes with its 14 left / 8 right. The trimmed side
+-- tucks the rows slightly under the border art, which is safe for the reason
+-- given there: the rows are child frames, so they always draw above it.
+local STATS_RIGHT_PAD_TRIM = 6
+
+local function ContentSidePads(horizontal)
     local edge = ContentEdgePad()
-    if edge == 0 then return BARE_TEXT_PAD end
-    return math.max(horizontal and HORIZONTAL_SIDE_PAD or TEXT_PAD, edge)
+    if edge == 0 then return BARE_TEXT_PAD, BARE_TEXT_PAD end
+    local left = math.max(horizontal and HORIZONTAL_SIDE_PAD or TEXT_PAD, edge)
+    return left, left - STATS_RIGHT_PAD_TRIM
 end
 
 local function TitlesShown()
@@ -510,16 +573,107 @@ local function TileHeight()
     return STAT_ROW_H + (TitlesShown() and TITLE_BAND_H or 0)
 end
 
--- Natural size of one tile at scale 1, and the extent the visible rows occupy.
--- Both layouts are the same arithmetic with the axes swapped.
-local function NaturalExtent()
-    local count = math.max(1, #VisibleCounters())
-    local tileH = TileHeight()
-    local rowW = ActiveVariant().width
-    if Rustcore.GetSetting("statsHorizontalLayout") then
-        return (count * rowW) + ((count - 1) * COLUMN_GAP), tileH
+-- Whether the best item is showing as the long frame: only when the option is
+-- on and the best item is switched on at all. Otherwise the layout is the plain
+-- one-column (or one-row) strip.
+local function LongItemShown()
+    if not Rustcore.GetSetting("statsLongItemName") then return false end
+    for _, counter in ipairs(VisibleCounters()) do
+        if counter.isBestItem then return true end
     end
-    return rowW, (count * tileH) + ((count - 1) * ROW_GAP)
+    return false
+end
+
+-- The long frame at scale 1: two counter columns wide, height from the art.
+local function LongItemSize()
+    local width = (2 * ActiveVariant().width) + COLUMN_GAP
+    return width, width / LONG_ITEM_ASPECT
+end
+
+-- Where everything goes, at scale 1, worked out in one place. NaturalExtent
+-- measures from it and RefreshLayout places from it, so the size the window is
+-- fitted to and the positions the rows land at cannot disagree.
+--
+-- Positions are tile top-left corners within the strip, with y measured
+-- downward; a tile includes the heading band above its art.
+--
+--   vertical     one column of counters -- or, with the long frame, two
+--                columns of counters and the long frame on a row underneath
+--   horizontal   one row of counters, and the long frame on a row underneath
+local function ComputeLayout()
+    local horizontal = Rustcore.GetSetting("statsHorizontalLayout")
+    local rowW, tileH = ActiveVariant().width, TileHeight()
+    local band = TitlesShown() and TITLE_BAND_H or 0
+    local long = LongItemShown()
+
+    local counters = {}
+    for _, counter in ipairs(VisibleCounters()) do
+        if not (long and counter.isBestItem) then
+            counters[#counters + 1] = counter
+        end
+    end
+
+    local count = #counters
+    local cols = 1
+    if horizontal then
+        cols = math.max(1, count)
+    elseif long then
+        cols = math.max(1, math.min(2, count))
+    end
+    local rows = (count > 0) and math.ceil(count / cols) or 0
+    local gridW = (count > 0) and ((cols * rowW) + ((cols - 1) * COLUMN_GAP)) or 0
+    local gridH = (rows > 0) and ((rows * tileH) + ((rows - 1) * ROW_GAP)) or 0
+
+    local layout = { cells = {}, band = band }
+    local stripW, stripH = gridW, gridH
+    if long then
+        local longW, longH = LongItemSize()
+        local top = gridH + ((gridH > 0) and ROW_GAP or 0)
+        stripW = math.max(gridW, longW)
+        stripH = top + band + longH
+        layout.long = { x = (stripW - longW) / 2, y = top, w = longW, h = longH }
+    end
+
+    -- Centred over the long frame when the two differ in width, as with a
+    -- single counter above a frame two columns wide.
+    local gridX = (stripW - gridW) / 2
+
+    -- Two columns with an odd counter out: the last counter takes the top row
+    -- on its own, centred, and the rest fill the rows below it in pairs. That
+    -- leaves no gap at the end of the row sitting on the long frame, and the
+    -- row count is unchanged, so the sizing above already fits it.
+    local loneTop = (not horizontal) and long and cols == 2 and (count % 2 == 1)
+    if loneTop then
+        layout.cells[#layout.cells + 1] = {
+            counter = counters[count],
+            x = (stripW - rowW) / 2,
+            y = 0,
+        }
+    end
+
+    local firstRow = loneTop and 1 or 0
+    local paired = loneTop and (count - 1) or count
+    for index = 1, paired do
+        local col = (index - 1) % cols
+        local row = firstRow + math.floor((index - 1) / cols)
+        layout.cells[#layout.cells + 1] = {
+            counter = counters[index],
+            x = gridX + (col * (rowW + COLUMN_GAP)),
+            y = row * (tileH + ROW_GAP),
+        }
+    end
+
+    -- Never zero: with nothing switched on, the window still needs something to
+    -- scale against.
+    layout.width = math.max(stripW, rowW)
+    layout.height = math.max(stripH, tileH)
+    return layout
+end
+
+-- Natural size of everything showing, at scale 1.
+local function NaturalExtent()
+    local layout = ComputeLayout()
+    return layout.width, layout.height
 end
 
 -- The rows are fixed art, so instead of re-deriving a size for every element the
@@ -527,9 +681,9 @@ end
 -- digits all keep their proportions to each other.
 local function LayoutScale(width, height)
     local pad = ContentTextPad()
-    local sidePad = ContentSidePad(Rustcore.GetSetting("statsHorizontalLayout"))
+    local padL, padR = ContentSidePads(Rustcore.GetSetting("statsHorizontalLayout"))
     local naturalW, naturalH = NaturalExtent()
-    local availW = math.max(1, width - (sidePad * 2))
+    local availW = math.max(1, width - (padL + padR))
     local availH = math.max(1, height - (pad * 2))
     return Clamp(math.min(availW / naturalW, availH / naturalH),
         MIN_ROW_SCALE, MAX_ROW_SCALE)
@@ -548,9 +702,9 @@ end
 
 local function GetMinWidth()
     local naturalW = NaturalExtent()
-    local sidePad = ContentSidePad(Rustcore.GetSetting("statsHorizontalLayout"))
+    local padL, padR = ContentSidePads(Rustcore.GetSetting("statsHorizontalLayout"))
     return math.max(MIN_WIDTH,
-        math.ceil((naturalW * MIN_ROW_SCALE) + (sidePad * 2)))
+        math.ceil((naturalW * MIN_ROW_SCALE) + (padL + padR)))
 end
 
 local function ApplyResizeBounds()
@@ -596,8 +750,8 @@ function RustcoreStats.ApplyLayoutModeChange()
     if not statsFrame then return end
     local naturalW, naturalH = NaturalExtent()
     local pad = ContentTextPad()
-    local sidePad = ContentSidePad(Rustcore.GetSetting("statsHorizontalLayout"))
-    local targetW = Clamp(math.ceil((naturalW * DEFAULT_ROW_SCALE) + (sidePad * 2)), GetMinWidth(), MAX_WIDTH)
+    local padL, padR = ContentSidePads(Rustcore.GetSetting("statsHorizontalLayout"))
+    local targetW = Clamp(math.ceil((naturalW * DEFAULT_ROW_SCALE) + (padL + padR)), GetMinWidth(), MAX_WIDTH)
     local targetH = Clamp(math.ceil((naturalH * DEFAULT_ROW_SCALE) + (pad * 2)), GetMinHeight(), MAX_HEIGHT)
     statsFrame:SetSize(targetW, targetH)
     SaveSize(statsFrame)
@@ -609,71 +763,73 @@ function RustcoreStats.RefreshLayout()
     ApplyResizeBounds()
 
     local width, height = statsFrame:GetSize()
-    local horizontal = Rustcore.GetSetting("statsHorizontalLayout")
     local pad = ContentTextPad()
-    local sidePad = ContentSidePad(horizontal)
-    local visible = VisibleCounters()
+    local padL, padR = ContentSidePads(Rustcore.GetSetting("statsHorizontalLayout"))
     local scale = LayoutScale(width, height)
-
-    -- Rows are laid out at scale 1 and then scaled as a group, so every offset
-    -- below is in unscaled units and the strip keeps its proportions.
+    local layout = ComputeLayout()
     local titles = TitlesShown()
-    local band = titles and TITLE_BAND_H or 0
     local variant = ActiveVariant()
-    local rowW, tileH = variant.width, TileHeight()
-    local stepX = horizontal and (rowW + COLUMN_GAP) or 0
-    local stepY = horizontal and 0 or (tileH + ROW_GAP)
-    local count = #visible
-    local stripW = horizontal and ((count * rowW) + ((count - 1) * COLUMN_GAP)) or rowW
-    local stripH = horizontal and tileH or ((count * tileH) + ((count - 1) * ROW_GAP))
 
     -- Centred in whatever room is left, so extra window size becomes margin
     -- rather than stretching the art.
-    local originX = sidePad + math.max(0, ((width - (sidePad * 2)) - (stripW * scale)) * 0.5)
-    local originY = pad + math.max(0, ((height - (pad * 2)) - (stripH * scale)) * 0.5)
+    local originX = padL + math.max(0, ((width - (padL + padR)) - (layout.width * scale)) * 0.5)
+    local originY = pad + math.max(0, ((height - (pad * 2)) - (layout.height * scale)) * 0.5)
 
-    local shownIndex = 0
+    -- Everything is laid out at scale 1 and then scaled, so layout positions are
+    -- unscaled. SetPoint on a scaled frame measures in that frame's own units,
+    -- hence dividing by the scale; the heading band is already in row units, so
+    -- it is added afterwards.
+    local function Place(frame, x, y)
+        frame:SetScale(scale)
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", statsFrame, "TOPLEFT",
+            (originX + (x * scale)) / scale,
+            -((originY + (y * scale)) / scale) - layout.band)
+    end
+
+    local cellFor = {}
+    for _, cell in ipairs(layout.cells) do
+        cellFor[cell.counter.key] = cell
+    end
+
     for _, counter in ipairs(ALL_COUNTERS) do
         local pair = RowPair(counter)
         if pair then
-            local show = false
-            for _, entry in ipairs(visible) do
-                if entry.key == counter.key then show = true; break end
-            end
-
             -- Only one variant is ever on screen; the other is parked hidden
             -- with its content already up to date.
             local row = (variant == ICON_ROW) and pair.icon or pair.plain
             local other = (variant == ICON_ROW) and pair.plain or pair.icon
             if other then other:Hide() end
 
-            if show then
-                row:SetScale(scale)
-                row:ClearAllPoints()
-                -- Offsets are divided by the scale because SetPoint on a scaled
-                -- frame measures in that frame's own units, not the parent's.
-                -- The band is added in row units for the same reason: it is
-                -- already part of the tile the strip was measured from.
-                row:SetPoint("TOPLEFT", statsFrame, "TOPLEFT",
-                    (originX + (shownIndex * stepX * scale)) / scale,
-                    -((originY + (shownIndex * stepY * scale)) / scale) - band)
-                shownIndex = shownIndex + 1
-            end
-            row:SetShown(show)
-            if row.title then row.title:SetShown(show and titles) end
+            local cell = cellFor[counter.key]
+            if cell then Place(row, cell.x, cell.y) end
+            row:SetShown(cell ~= nil)
+            if row.title then row.title:SetShown(cell ~= nil and titles) end
         end
+    end
+
+    local longRow = statsFrame.longItemRow
+    if longRow then
+        local long = layout.long
+        if long then
+            longRow:SetSize(long.w, long.h)
+            longRow.name:SetWidth(long.w * LONG_ITEM_TEXT_WIDTH_RATIO)
+            Place(longRow, long.x, long.y)
+        end
+        longRow:SetShown(long ~= nil)
+        if longRow.title then longRow.title:SetShown(long ~= nil and titles) end
     end
 end
 
 local function GetAutoFitWidth()
     if not statsFrame then return DEFAULT_WIDTH end
     local naturalW = NaturalExtent()
-    local sidePad = ContentSidePad(Rustcore.GetSetting("statsHorizontalLayout"))
+    local padL, padR = ContentSidePads(Rustcore.GetSetting("statsHorizontalLayout"))
     -- Measured at the scale the window is already using, so auto-fitting the
     -- width does not silently resize the rows as well.
     local _, height = statsFrame:GetSize()
     local scale = LayoutScale(statsFrame:GetWidth(), height)
-    return Clamp(math.ceil((naturalW * scale) + (sidePad * 2)), GetMinWidth(), MAX_WIDTH)
+    return Clamp(math.ceil((naturalW * scale) + (padL + padR)), GetMinWidth(), MAX_WIDTH)
 end
 
 local function AutoFitWidth(frame)
@@ -779,6 +935,71 @@ local function BuildStatsFrame()
         return slot
     end
 
+    -- Rows cover nearly the whole window, so they have to forward dragging and
+    -- the right-click to the panel or there would be nowhere left to grab it
+    -- by. The tooltip names the stat, or shows the item for a row that holds
+    -- one: such a row is already naming the item, so the item is the answer to
+    -- "what am I looking at?".
+    local function WireRowMouse(row, counter)
+        row:EnableMouse(true)
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function() f:StartMoving() end)
+        row:SetScript("OnDragStop", function()
+            f:StopMovingOrSizing()
+            SavePosition(f)
+        end)
+        row:SetScript("OnMouseUp", function(_, button)
+            if button == "RightButton" then
+                RustcoreOptions.Toggle()
+            end
+        end)
+        row:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR", 0, -32)
+            if self.itemLink then
+                GameTooltip:SetHyperlink(self.itemLink)
+            else
+                GameTooltip:AddLine(counter.title, 1, 0.82, 0)
+                GameTooltip:AddLine(counter.tooltip, 0.8, 0.8, 0.8, true)
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    -- A heading for a row, in the band RefreshLayout reserves above it. A child
+    -- frame of the row, so it scales, moves and hides with it, holding both
+    -- copies of the text so one SetShown covers the pair.
+    --
+    -- The shadow is a second, black copy of the text drawn underneath and
+    -- offset, not SetShadowOffset: native font shadows do not render on this
+    -- client (see BuildSpacedHeader in RustcoreDifficultyPopup.lua).
+    local function BuildRowTitle(row, text)
+        local title = CreateFrame("Frame", nil, row)
+        title:SetPoint("BOTTOM", row, "TOP", 0, 1)
+        title:EnableMouse(false)
+
+        local titleShadow = title:CreateFontString(nil, "ARTWORK")
+        titleShadow:SetFont(BODY_FONT_PATH, TITLE_FONT_SIZE, "")
+        titleShadow:SetTextColor(0, 0, 0, TITLE_SHADOW_ALPHA)
+        titleShadow:SetWordWrap(false)
+        titleShadow:SetText(text)
+        titleShadow:SetPoint("CENTER", title, "CENTER", TITLE_SHADOW_OFFSET, -TITLE_SHADOW_OFFSET)
+
+        local titleText = title:CreateFontString(nil, "OVERLAY")
+        titleText:SetFont(BODY_FONT_PATH, TITLE_FONT_SIZE, "")
+        titleText:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
+        titleText:SetWordWrap(false)
+        titleText:SetText(text)
+        titleText:SetPoint("CENTER", title, "CENTER", 0, 0)
+
+        -- A frame has no size of its own, so it takes the text's; without one
+        -- the BOTTOM anchor above has nothing to measure from.
+        title:SetSize(math.max(1, titleText:GetStringWidth() or 0) + TITLE_SHADOW_OFFSET,
+            TITLE_FONT_SIZE + 3)
+        title:Hide()
+        return title
+    end
+
     -- One stat row in one of its two shapes. The iconic variant puts an item
     -- icon at the left with the counter art wrapped around it; the plain one is
     -- the counter graphic on its own. Everything else -- the digits, the roll,
@@ -832,6 +1053,8 @@ local function BuildStatsFrame()
                 local brokenTex = brokenHost:CreateTexture(nil, "OVERLAY")
                 brokenTex:SetAllPoints(brokenHost)
                 brokenTex:SetTexture(Rustcore.GetAssetPath("UI/Brokenframe copy.tga"))
+                brokenTex:SetDesaturation(1)
+                brokenTex:SetVertexColor(BROKEN_OVERLAY_GREY, BROKEN_OVERLAY_GREY, BROKEN_OVERLAY_GREY)
                 brokenHost:Hide()
             end
         end
@@ -853,26 +1076,29 @@ local function BuildStatsFrame()
         -- A row shows either three rolling digits or one name, never both.
         local digits, name, nameBg
         if counter.showsName then
+            -- The variant's name box. It clips, and that clipping is what cuts
+            -- a long name off at the right-hand edge.
             local nameHost = CreateFrame("Frame", nil, row)
-            nameHost:SetSize(NAME_AREA_W, DIGIT_SLOT_H + 2)
-            nameHost:SetPoint("CENTER", row, "LEFT", variant.nameCenterX, 0)
+            nameHost:SetSize(variant.nameWidth, variant.nameHeight)
+            nameHost:SetPoint("LEFT", row, "LEFT", variant.nameLeft, variant.nameYOffset or 0)
             nameHost:SetFrameLevel(row:GetFrameLevel() + 5)
-            -- Clips whatever is left after the shrink-to-fit pass gives up.
             if nameHost.SetClipsChildren then nameHost:SetClipsChildren(true) end
             nameHost:EnableMouse(false)
+            row.nameBoxWidth = variant.nameWidth
 
-            -- Sized to the text by SetCounterName, so a short name gets a small
-            -- plate rather than a black bar with a word floating in it.
+            -- Placed and sized by SetCounterName, centred on the text.
             nameBg = nameHost:CreateTexture(nil, "BACKGROUND")
-            nameBg:SetHeight(DIGIT_SLOT_H)
+            nameBg:SetHeight(variant.nameHeight)
             nameBg:SetPoint("CENTER", nameHost, "CENTER", 0, 0)
             nameBg:SetColorTexture(NAME_BACKDROP_COLOR[1], NAME_BACKDROP_COLOR[2],
                 NAME_BACKDROP_COLOR[3], NAME_BACKDROP_COLOR[4])
 
+            -- Deliberately given no width of its own: a font string with a set
+            -- width shortens a long line itself, with an ellipsis, whereas left
+            -- free it runs on and the box cuts it cleanly. SetCounterName
+            -- decides where it is anchored.
             name = nameHost:CreateFontString(nil, "OVERLAY")
-            name:SetFont(BODY_FONT_PATH, NAME_FONT_SIZE, "")
-            name:SetShadowColor(0, 0, 0, 1)
-            name:SetShadowOffset(1, -1)
+            name:SetFont(BODY_FONT_PATH, variant.nameFontSize, "")
             name:SetJustifyH("CENTER")
             name:SetJustifyV("MIDDLE")
             name:SetWordWrap(false)
@@ -884,48 +1110,8 @@ local function BuildStatsFrame()
             end
         end
 
-        -- Rows cover nearly the whole window, so they have to forward dragging
-        -- and the right-click to the panel or there would be nowhere left to
-        -- grab it by.
-        row:EnableMouse(true)
-        row:RegisterForDrag("LeftButton")
-        row:SetScript("OnDragStart", function() f:StartMoving() end)
-        row:SetScript("OnDragStop", function()
-            f:StopMovingOrSizing()
-            SavePosition(f)
-        end)
-        row:SetScript("OnMouseUp", function(_, button)
-            if button == "RightButton" then
-                RustcoreOptions.Toggle()
-            end
-        end)
-        row:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR", 0, -32)
-            -- The best-item row shows the item itself when it has one: the row
-            -- is already naming that item, so the item is the answer to "what
-            -- am I looking at?".
-            if self.itemLink then
-                GameTooltip:SetHyperlink(self.itemLink)
-            else
-                GameTooltip:AddLine(counter.title, 1, 0.82, 0)
-                GameTooltip:AddLine(counter.tooltip, 0.8, 0.8, 0.8, true)
-            end
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Sits in the band RefreshLayout reserved above the row. A child of the
-        -- row rather than of the panel, so it scales, moves and hides with it.
-        local title = row:CreateFontString(nil, "OVERLAY")
-        title:SetFont(BODY_FONT_PATH, TITLE_FONT_SIZE, "")
-        title:SetShadowColor(0, 0, 0, 1)
-        title:SetShadowOffset(TITLE_SHADOW_OFFSET, -TITLE_SHADOW_OFFSET)
-        title:SetJustifyH("CENTER")
-        title:SetWordWrap(false)
-        title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
-        title:SetText(counter.title)
-        title:SetPoint("BOTTOM", row, "TOP", 0, 1)
-        title:Hide()
+        WireRowMouse(row, counter)
+        local title = BuildRowTitle(row, counter.title)
 
         row.icon = icon
         row.digits = digits
@@ -938,6 +1124,40 @@ local function BuildStatsFrame()
         row:Hide()
         return row
     end
+
+    -- The long best-item frame, shown in place of the best-item counter when
+    -- statsLongItemName is on. One frame serves both counter variants: nothing
+    -- in it depends on whether the counters carry icons except its size, and
+    -- RefreshLayout sets that.
+    local bestCounter
+    for _, counter in ipairs(ALL_COUNTERS) do
+        if counter.isBestItem then bestCounter = counter end
+    end
+
+    local longRow = CreateFrame("Frame", nil, textLayer)
+    longRow:SetSize(LongItemSize())
+
+    local longArt = longRow:CreateTexture(nil, "ARTWORK")
+    longArt:SetAllPoints(longRow)
+    longArt:SetTexture(Rustcore.GetAssetPath(LONG_ITEM_ART))
+
+    -- Centred, as this frame always showed it. RefreshLayout gives it a width,
+    -- so a name too long even for this frame is shortened with an ellipsis
+    -- rather than running over the art.
+    local longName = longRow:CreateFontString(nil, "OVERLAY")
+    longName:SetFont(BODY_FONT_PATH, LONG_ITEM_FONT_SIZE, "")
+    longName:SetJustifyH("CENTER")
+    longName:SetJustifyV("MIDDLE")
+    longName:SetWordWrap(false)
+    longName:SetPoint("CENTER", longRow, "CENTER", 0, 0)
+    longRow.name = longName
+
+    if bestCounter then
+        WireRowMouse(longRow, bestCounter)
+        longRow.title = BuildRowTitle(longRow, bestCounter.title)
+    end
+    longRow:Hide()
+    f.longItemRow = longRow
 
     f.rows = {}
     for _, counter in ipairs(ALL_COUNTERS) do

@@ -615,11 +615,10 @@ function V.CheckIntegrityRestore()
         local track = record[trackName]
         if track and track.status == V.STATUS.SUSPENDED and track.integrityHold then
             if tracked >= track.integrityHold then
-                -- Refuse while the record still fails, or a genuinely broken one
-                -- would be handed back its certification on a timer.
-                local ok = true
-                if V.Integrity and V.Integrity.Check then ok = V.Integrity.Check(record) end
-                if ok and V.Restore(trackName, "clean play since the record was rebuilt") then
+                -- The hold's own countdown is the whole condition. A seal
+                -- mismatch is diagnostic only now, so a record that still fails
+                -- its check is no reason to keep certification from coming back.
+                if V.Restore(trackName, "clean play since the record was rebuilt") then
                     track.integrityHold = nil
                     track.statusReason = nil
                     restoredAny = true
@@ -913,7 +912,7 @@ SlashCmdList["RCVERIFY"] = function()
     if V.Integrity and V.Integrity.Check then ok, reason, stale = V.Integrity.Check(record) end
     local verdict
     if not ok then
-        verdict = "|cffff4444" .. tostring(reason) .. "|r"
+        verdict = "|cffff4444" .. tostring(reason) .. " (diagnostic only)|r"
     elseif stale then
         -- Distinct from "ok" on purpose: nothing was actually compared, and
         -- saying "ok" would claim a check that did not happen.
@@ -935,8 +934,13 @@ SlashCmdList["RCVERIFY"] = function()
         (chain.sealFields ~= nil and live ~= nil and chain.sealFields ~= live)
             and "  |cffffd700-> shape changed, check skipped|r" or ""))
 
-    if record.tamperReason then
-        print("  Tamper flag: |cffff4444" .. tostring(record.tamperReason) .. "|r")
+    -- The last mismatch the login check found, if any. Diagnostic only: it has
+    -- no effect on verification, and is shown so a report can say what was seen.
+    local diagnostic = record.integrityDiagnostic
+    if type(diagnostic) == "table" and diagnostic.reason then
+        local when = (diagnostic.at and date) and date("%Y-%m-%d %H:%M", diagnostic.at) or "unknown time"
+        print(string.format("  Last checksum mismatch: |cffffd700%s|r at %s (no effect on verification)",
+            tostring(diagnostic.reason), when))
     end
     for _, name in ipairs({ "difficulty", "selfFound" }) do
         local track = record[name] or {}

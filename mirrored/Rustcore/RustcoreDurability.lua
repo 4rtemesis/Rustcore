@@ -55,17 +55,18 @@ end
 -- the stats window's row headings, because a player running both should read
 -- them as the same UI rather than two addons that happen to sit side by side.
 --
--- One heading for the whole panel, not one per counter: every row here counts
--- the same thing about a different slot, and the item icon already says which
--- slot. The stats window is the opposite case and labels each row.
+-- In a vertical stack that is one heading for the whole panel. A horizontal row
+-- reads as a row of separate items instead, so there each counter gets its own
+-- heading naming its slot (see SLOT_TITLES). Both use this same style.
 local HUD_TITLE_TEXT     = "Durability"
 local HUD_TITLE_FONT_SIZE = 11
 local HUD_TITLE_BAND_H   = 14
 local HUD_TITLE_COLOR    = { 1, 0.82, 0 }
--- Two pixels rather than the one the counter digits use. The digits sit on the
--- counter graphic, which is dark already; the heading sits over whatever the
--- player has behind the HUD, which may be anything.
-local HUD_TITLE_SHADOW   = 2
+-- The heading's shadow is a black copy of the text drawn underneath, offset by
+-- this much, because native font shadows don't render on this client. Matches
+-- the stats window's headings exactly, so the two read as the same UI.
+local HUD_TITLE_SHADOW       = 1
+local HUD_TITLE_SHADOW_ALPHA = 1
 
 local function TitleBand()
     return Rustcore.GetSetting("durHUDShowTitle") and HUD_TITLE_BAND_H or 0
@@ -474,7 +475,11 @@ local function GetOrSeedCornerPos(corner, raw, w, h, sw, sh)
     local nx, ny = GetNativeDurabilityDefault(corner)
     local s = CornerSigns(corner)
     local shift = (s.x < 0) and GetRightActionBarShift() or 0
-    return nx or ((60 + shift) * s.x), ny or (220 * s.y), true
+    -- Both defaults are UIParent-sized distances; the offset is applied in the
+    -- HUD's own units, which are larger by its scale.
+    local scale = hudContainer and hudContainer:GetScale() or 1
+    if nx then nx, ny = nx / scale, ny / scale end
+    return nx or ((60 + shift) * s.x / scale), ny or (220 * s.y / scale), true
 end
 
 -- This only ever runs at init, on manual drag-stop, or when the grow-upward
@@ -483,7 +488,10 @@ local function ApplyHUDPosition()
     if not hudContainer then return end
     local corner = GetHUDAnchorCorner()
     local w, h = hudContainer:GetWidth(), hudContainer:GetHeight()
-    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    -- The HUD is positioned in its own units, which are larger than UIParent's
+    -- by the HUD's scale, so the screen is measured in those units too.
+    local scale = hudContainer:GetScale()
+    local sw, sh = UIParent:GetWidth() / scale, UIParent:GetHeight() / scale
 
     local raw = GetHUDPosTable()
     local x0, y0, isNew = GetOrSeedCornerPos(corner, raw, w, h, sw, sh)
@@ -525,11 +533,14 @@ local function ReanchorToFixedCorner(corner)
             and uiLeft and uiRight and uiTop and uiBottom) then return nil end
 
     local w, h = hudContainer:GetWidth(), hudContainer:GetHeight()
-    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    -- The HUD is positioned in its own units, which are larger than UIParent's
+    -- by the HUD's scale, so the screen is measured in those units too.
+    local scale = hudContainer:GetScale()
+    local sw, sh = UIParent:GetWidth() / scale, UIParent:GetHeight() / scale
 
     local s = CornerSigns(corner)
-    local x0 = (s.x < 0) and (right - uiRight) or (left - uiLeft)
-    local y0 = (s.y > 0) and (bottom - uiBottom) or (top - uiTop)
+    local x0 = (s.x < 0) and (right - uiRight / scale) or (left - uiLeft / scale)
+    local y0 = (s.y > 0) and (bottom - uiBottom / scale) or (top - uiTop / scale)
     local x, y = ClampToScreen(corner, x0, y0, w, h, sw, sh)
 
     hudContainer:ClearAllPoints()
@@ -642,6 +653,24 @@ local function BuildDigitSlot(parent, idx)
     return slot
 end
 
+-- Per-slot headings for the horizontal layout. A row of counters side by side
+-- reads as a row of separate items, so each is named for the slot it watches;
+-- a vertical stack keeps the single panel heading instead. Names come from the
+-- client GlobalStrings, so they follow its language, with English as a fallback.
+local SLOT_TITLES = {
+    [1]  = HEADSLOT or "Head",
+    [3]  = SHOULDERSLOT or "Shoulder",
+    [5]  = CHESTSLOT or "Chest",
+    [6]  = WAISTSLOT or "Waist",
+    [7]  = LEGSSLOT or "Legs",
+    [8]  = FEETSLOT or "Feet",
+    [9]  = WRISTSLOT or "Wrist",
+    [10] = HANDSSLOT or "Hands",
+    [16] = MAINHANDSLOT or "Main Hand",
+    [17] = SECONDARYHANDSLOT or "Off Hand",
+    [18] = RANGEDSLOT or "Ranged",
+}
+
 local function BuildSlotFrame(parent, slotId)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(FRAME_W, FRAME_H)
@@ -716,10 +745,39 @@ local function BuildSlotFrame(parent, slotId)
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- Slot heading for the horizontal layout, in the band UpdateHUD reserves
+    -- above the row. Built like the panel heading -- a frame holding a black
+    -- copy of the text under the real one, since native font shadows do not
+    -- render on this client -- and parented to this counter, so it moves and
+    -- hides with it. UpdateHUD decides whether it shows.
+    local slotTitle = CreateFrame("Frame", nil, f)
+    slotTitle:EnableMouse(false)
+    local slotTitleText = SLOT_TITLES[slotId] or ""
+
+    local slotTitleShadow = slotTitle:CreateFontString(nil, "ARTWORK")
+    slotTitleShadow:SetFont(BODY_FONT_PATH, HUD_TITLE_FONT_SIZE, "")
+    slotTitleShadow:SetTextColor(0, 0, 0, HUD_TITLE_SHADOW_ALPHA)
+    slotTitleShadow:SetWordWrap(false)
+    slotTitleShadow:SetText(slotTitleText)
+    slotTitleShadow:SetPoint("CENTER", slotTitle, "CENTER", HUD_TITLE_SHADOW, -HUD_TITLE_SHADOW)
+
+    local slotTitleFs = slotTitle:CreateFontString(nil, "OVERLAY")
+    slotTitleFs:SetFont(BODY_FONT_PATH, HUD_TITLE_FONT_SIZE, "")
+    slotTitleFs:SetTextColor(HUD_TITLE_COLOR[1], HUD_TITLE_COLOR[2], HUD_TITLE_COLOR[3])
+    slotTitleFs:SetWordWrap(false)
+    slotTitleFs:SetText(slotTitleText)
+    slotTitleFs:SetPoint("CENTER", slotTitle, "CENTER", 0, 0)
+
+    slotTitle:SetSize(math.max(1, slotTitleFs:GetStringWidth() or 0) + HUD_TITLE_SHADOW,
+        HUD_TITLE_FONT_SIZE + 3)
+    slotTitle:SetPoint("BOTTOM", f, "TOP", 0, 1)
+    slotTitle:Hide()
+
     f.iconTex   = iconTex
     f.sepiaTex  = sepiaTex
     f.rustedTex = rustedTex
     f.digits    = digits
+    f.slotTitle = slotTitle
     f:Hide()
     return f
 end
@@ -740,6 +798,136 @@ local function ApplyBackgroundVisibility()
     end
 end
 
+-- ── Resize ──────────────────────────────────────────────────────────────────
+--
+-- The stats window resizes by changing its own size and scaling its rows to
+-- fit. The HUD cannot: its size is not a choice, it is however many counters
+-- are showing, and UpdateHUD sets it afresh on every durability change. So the
+-- HUD's corner grip changes its scale instead -- counters and panel art grow
+-- and shrink together, about the corner the HUD is pinned to.
+--
+-- Positions are stored in the HUD's own units, which a scale change alters, so
+-- rescaling also converts the live anchor (ApplyHUDScale) and every saved
+-- corner position (CommitHUDScale). The position maths above already measures
+-- the screen in those same units.
+local HUD_MIN_SCALE = 0.6
+local HUD_MAX_SCALE = 2.0
+local HUD_RESIZE_TOOLTIP = "Left click and drag to resize. Right click to reset the size."
+
+-- In a horizontal row the grip lives diagonally opposite the pinned corner; in
+-- a vertical stack it lives on the right edge at the growing end (see
+-- UpdateHUD). Either way it is on the far side from the pin, so dragging away
+-- from the pin enlarges the HUD and dragging towards it shrinks it.
+local OPPOSITE_CORNER = {
+    TOPRIGHT = "BOTTOMLEFT", BOTTOMLEFT = "TOPRIGHT",
+    TOPLEFT = "BOTTOMRIGHT", BOTTOMRIGHT = "TOPLEFT",
+}
+
+local resizeState -- non-nil only while the grip is being dragged
+
+local function SavedHUDScale()
+    return Clamp(tonumber(Rustcore.GetProfileValue("durHUDScale")) or 1,
+        HUD_MIN_SCALE, HUD_MAX_SCALE)
+end
+
+-- Rescale about the pinned corner. The anchor offset is in the HUD's own units,
+-- so the same offset lands further out at a larger scale; dividing it by the
+-- scale ratio keeps the pinned corner on exactly the pixel it was on.
+local function ApplyHUDScale(newScale)
+    if not hudContainer then return end
+    newScale = Clamp(newScale, HUD_MIN_SCALE, HUD_MAX_SCALE)
+    local oldScale = hudContainer:GetScale()
+    if math.abs(newScale - oldScale) < 0.001 then return end
+
+    local corner = GetHUDAnchorCorner()
+    local _, _, _, x, y = hudContainer:GetPoint(1)
+    hudContainer:SetScale(newScale)
+    if x and y then
+        local ratio = oldScale / newScale
+        hudContainer:ClearAllPoints()
+        hudContainer:SetPoint(corner, UIParent, corner, x * ratio, y * ratio)
+    end
+end
+
+-- Persist a finished resize. Every saved corner is converted by the same ratio,
+-- not only the active one, or switching grow direction later would read an
+-- offset measured at the old scale.
+local function CommitHUDScale(startScale)
+    if not hudContainer then return end
+    local scale = hudContainer:GetScale()
+    local ratio = startScale / scale
+    local raw = GetHUDPosTable()
+    for _, corner in ipairs(CORNER_ORDER) do
+        local pos = raw[corner]
+        if type(pos) == "table" and pos.x and pos.y then
+            raw[corner] = { x = pos.x * ratio, y = pos.y * ratio }
+        end
+    end
+    -- The live rect is the truth for the active corner, and re-deriving from it
+    -- also re-clamps, in case growing pushed an edge off the screen.
+    local corner = GetHUDAnchorCorner()
+    local x, y = ReanchorToFixedCorner(corner)
+    if x then raw[corner] = { x = x, y = y } end
+    Rustcore.SetProfileValue("durHUDPos", raw)
+    Rustcore.SetProfileValue("durHUDScale", scale)
+end
+
+-- The pinned corner in screen pixels, which is what the cursor is measured in.
+local function PinScreenPoint()
+    local s = CornerSigns(GetHUDAnchorCorner())
+    local x = (s.x < 0) and hudContainer:GetRight() or hudContainer:GetLeft()
+    local y = (s.y > 0) and hudContainer:GetBottom() or hudContainer:GetTop()
+    if not (x and y) then return nil end
+    local eff = hudContainer:GetEffectiveScale()
+    return x * eff, y * eff
+end
+
+-- Scale follows the cursor's distance from the pin, relative to where the drag
+-- began. Distance rather than one axis, so the grip behaves the same at every
+-- corner the pin can be in.
+local function UpdateHUDResize()
+    if not resizeState then return end
+    local cx, cy = GetCursorPosition()
+    local dx, dy = cx - resizeState.pinX, cy - resizeState.pinY
+    ApplyHUDScale(resizeState.startScale
+        * math.sqrt(dx * dx + dy * dy) / resizeState.startDistance)
+end
+
+local function StartHUDResize()
+    if not hudContainer or resizeState or hudContainer.isDragging then return end
+    local pinX, pinY = PinScreenPoint()
+    if not pinX then return end
+    local cx, cy = GetCursorPosition()
+    local dx, dy = cx - pinX, cy - pinY
+    resizeState = {
+        startScale = hudContainer:GetScale(),
+        pinX = pinX,
+        pinY = pinY,
+        -- Floored so a press landing almost on the pin cannot turn the smallest
+        -- mouse movement into a huge jump in scale.
+        startDistance = math.max(12, math.sqrt(dx * dx + dy * dy)),
+    }
+    hudContainer.resizeGrip:Show()
+    -- Driven from a frame of its own: the grip hides when the cursor leaves it,
+    -- and a hidden frame's OnUpdate stops running.
+    hudContainer.resizeDriver:SetScript("OnUpdate", UpdateHUDResize)
+end
+
+local function StopHUDResize()
+    if not resizeState then return end
+    local startScale = resizeState.startScale
+    resizeState = nil
+    hudContainer.resizeDriver:SetScript("OnUpdate", nil)
+    CommitHUDScale(startScale)
+end
+
+local function ResetHUDScale()
+    if not hudContainer or resizeState then return end
+    local startScale = hudContainer:GetScale()
+    ApplyHUDScale(1)
+    CommitHUDScale(startScale)
+end
+
 local function BuildHUD()
     if hudContainer then return end
 
@@ -748,12 +936,89 @@ local function BuildHUD()
     local f = CreateFrame("Frame", "RustcoreDurabilityHUD", UIParent)
     f:SetSize(FRAME_W, 10)
     f:SetFrameStrata("LOW")
+    -- Before anything positions it: every saved offset is in the scaled units.
+    f:SetScale(SavedHUDScale())
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", StartHUDDrag)
     f:SetScript("OnDragStop", StopHUDDrag)
     f:HookScript("OnHide", StopHUDDrag)
+    -- The HUD hides itself when nothing needs showing, which can happen mid-drag.
+    f:HookScript("OnHide", StopHUDResize)
+
+    -- Same grip, textures, hover reveal and clicks as the stats window's, so
+    -- the two resize the same way to the hand. UpdateHUD moves both the grip
+    -- and its hotspot to whichever corner is free.
+    local function ShowGripTooltip(owner)
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR", 0, -32)
+        GameTooltip:SetText(HUD_RESIZE_TOOLTIP, nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end
+
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    -- Above the counters, which are children of the container and would
+    -- otherwise take the click.
+    grip:SetFrameLevel(f:GetFrameLevel() + 20)
+    grip:RegisterForClicks("LeftButtonDown", "RightButtonUp")
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:Hide()
+    grip:SetScript("OnEnter", function(self)
+        self:Show()
+        ShowGripTooltip(self)
+    end)
+    grip:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+        if not resizeState then self:Hide() end
+    end)
+    grip:SetScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" then StartHUDResize() end
+    end)
+    grip:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then
+            ResetHUDScale()
+            return
+        end
+        if button ~= "LeftButton" then return end
+        StopHUDResize()
+        if not self.IsMouseOver or not self:IsMouseOver() then self:Hide() end
+    end)
+
+    local hotspot = CreateFrame("Frame", nil, f)
+    hotspot:SetSize(24, 24)
+    hotspot:SetFrameLevel(f:GetFrameLevel() + 19)
+    hotspot:EnableMouse(true)
+    hotspot:SetScript("OnEnter", function(self)
+        grip:Show()
+        ShowGripTooltip(self)
+    end)
+    hotspot:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+        C_Timer.After(0, function()
+            if not resizeState and (not grip.IsMouseOver or not grip:IsMouseOver()) then
+                grip:Hide()
+            end
+        end)
+    end)
+    hotspot:SetScript("OnMouseDown", function(_, button)
+        if button == "RightButton" then
+            ResetHUDScale()
+            return
+        end
+        if button == "LeftButton" then StartHUDResize() end
+    end)
+    hotspot:SetScript("OnMouseUp", function(_, button)
+        if button ~= "LeftButton" then return end
+        StopHUDResize()
+        if not grip.IsMouseOver or not grip:IsMouseOver() then grip:Hide() end
+    end)
+
+    f.resizeGrip = grip
+    f.resizeHotspot = hotspot
+    f.resizeDriver = CreateFrame("Frame")
 
     -- Panel art goes on the container rather than a child frame: a frame's own
     -- textures always draw below its child frames, so the slot frames sit on top
@@ -773,14 +1038,33 @@ local function BuildHUD()
     -- Pinned to the container's top edge, which is the one edge that stays put
     -- whichever way the stack grows: UpdateHUD reserves the band for it there
     -- in both anchor modes, so the heading never lands on top of a counter.
-    local title = f:CreateFontString(nil, "OVERLAY")
-    title:SetFont(BODY_FONT_PATH, HUD_TITLE_FONT_SIZE, "")
-    title:SetShadowColor(0, 0, 0, 1)
-    title:SetShadowOffset(HUD_TITLE_SHADOW, -HUD_TITLE_SHADOW)
-    title:SetJustifyH("CENTER")
-    title:SetWordWrap(false)
-    title:SetTextColor(HUD_TITLE_COLOR[1], HUD_TITLE_COLOR[2], HUD_TITLE_COLOR[3])
-    title:SetText(HUD_TITLE_TEXT)
+    --
+    -- A frame holding two copies of the text rather than one font string: the
+    -- shadow is a black copy drawn underneath and offset, because native font
+    -- shadows don't render on this client (see BuildSpacedHeader in
+    -- RustcoreDifficultyPopup.lua). UpdateHUD positions and shows `f.title`
+    -- through calls a frame answers just as a font string does, so it moves
+    -- and hides both copies without knowing there are two.
+    local title = CreateFrame("Frame", nil, f)
+    title:EnableMouse(false)
+
+    local titleShadow = title:CreateFontString(nil, "ARTWORK")
+    titleShadow:SetFont(BODY_FONT_PATH, HUD_TITLE_FONT_SIZE, "")
+    titleShadow:SetTextColor(0, 0, 0, HUD_TITLE_SHADOW_ALPHA)
+    titleShadow:SetWordWrap(false)
+    titleShadow:SetText(HUD_TITLE_TEXT)
+    titleShadow:SetPoint("CENTER", title, "CENTER", HUD_TITLE_SHADOW, -HUD_TITLE_SHADOW)
+
+    local titleText = title:CreateFontString(nil, "OVERLAY")
+    titleText:SetFont(BODY_FONT_PATH, HUD_TITLE_FONT_SIZE, "")
+    titleText:SetTextColor(HUD_TITLE_COLOR[1], HUD_TITLE_COLOR[2], HUD_TITLE_COLOR[3])
+    titleText:SetWordWrap(false)
+    titleText:SetText(HUD_TITLE_TEXT)
+    titleText:SetPoint("CENTER", title, "CENTER", 0, 0)
+
+    -- Sized to the text, so UpdateHUD's TOP anchor has an edge to pin.
+    title:SetSize(math.max(1, titleText:GetStringWidth() or 0) + HUD_TITLE_SHADOW,
+        HUD_TITLE_FONT_SIZE + 3)
     title:Hide()
     f.title = title
 
@@ -1002,10 +1286,50 @@ local function UpdateHUD()
                 #activeOrder * FRAME_H + (#activeOrder - 1) * SLOT_GAP + padY * 2 + band)
         end
 
+        -- Headings: one across the top for a vertical stack, or one over each
+        -- counter naming its slot for a horizontal row. Both sit in the same
+        -- band, so the sizing above does not need to know which it is.
         if hudContainer.title then
             hudContainer.title:ClearAllPoints()
             hudContainer.title:SetPoint("TOP", hudContainer, "TOP", 0, -padY - 1)
-            hudContainer.title:SetShown(band > 0)
+            hudContainer.title:SetShown(band > 0 and not horizontal)
+        end
+        for _, entry in ipairs(slotEntries) do
+            if entry.frame.slotTitle then
+                entry.frame.slotTitle:SetShown(band > 0 and horizontal and true or false)
+            end
+        end
+
+        -- The resize grip. In a vertical stack it always sits on the right
+        -- edge, at whichever end the stack grows towards: the bottom when it
+        -- grows down, the top when it grows up. In a horizontal row it sits in
+        -- the corner opposite the pinned one. Either can change with a setting,
+        -- so it is re-placed on every layout rather than once at build. The
+        -- grabber art points down and right; it is mirrored to point out of
+        -- whichever corner it lands in, and nudged a pixel inward the way the
+        -- stats window grip is.
+        if hudContainer.resizeGrip then
+            local free
+            if horizontal then
+                free = OPPOSITE_CORNER[GetHUDAnchorCorner()] or "BOTTOMLEFT"
+            else
+                free = Rustcore.GetSetting("durHUDGrowUpward") and "TOPRIGHT" or "BOTTOMRIGHT"
+            end
+            local s = CornerSigns(free)
+            local grip = hudContainer.resizeGrip
+            grip:ClearAllPoints()
+            grip:SetPoint(free, hudContainer, free, s.x, s.y)
+            hudContainer.resizeHotspot:ClearAllPoints()
+            hudContainer.resizeHotspot:SetPoint(free, hudContainer, free, 0, 0)
+
+            local left, right = 0, 1
+            if s.x > 0 then left, right = 1, 0 end
+            local top, bottom = 0, 1
+            if s.y < 0 then top, bottom = 1, 0 end
+            for _, tex in ipairs({ grip:GetNormalTexture(), grip:GetHighlightTexture(),
+                                   grip:GetPushedTexture() }) do
+                if tex then tex:SetTexCoord(left, right, top, bottom) end
+            end
         end
         -- No repositioning here: the container keeps a single anchor point
         -- (SetPoint(corner, ...)), and resizing only moves the unanchored
@@ -1162,6 +1486,9 @@ end
 -- e.g. importing another profile's layout, where landing on the imported
 -- spot is the whole point.
 function RustcoreDurability.RefreshPosition()
+    -- The imported size first: the imported position is in the scaled units, so
+    -- it only lands on the right spot once the scale it was saved at is back.
+    if hudContainer then hudContainer:SetScale(SavedHUDScale()) end
     ApplyHUDPosition()
     UpdateHUD()
 end

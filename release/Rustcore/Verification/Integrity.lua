@@ -9,6 +9,9 @@
 --
 -- This is tamper *evidence* against casual SavedVariables editing. It is not a
 -- cryptographic guarantee: anyone editing Rustcore's own Lua can recompute it.
+--
+-- Because of that, a mismatch is diagnostic only: it is recorded for /rcverify
+-- and changes nothing about verification. See I.Init.
 
 RustcoreVerification = RustcoreVerification or {}
 local V = RustcoreVerification
@@ -33,7 +36,7 @@ local MOD_B, MUL_B = 67108859, 131071  -- largest prime below 2^26, 2^17-1
 -- protects players from update-time false positives -- SealFingerprint below
 -- does that, and it cannot be forgotten the way a manual bump can. Kept because
 -- it costs nothing and makes a deliberate break explicit.
-I.SEAL_VERSION = 11
+I.SEAL_VERSION = 12
 
 -- How many chain events are retained. Older entries roll off; the head still
 -- carries their contribution.
@@ -59,6 +62,15 @@ local function Escape(value)
     return (gsub(tostring(value), "[|;=]", "_"))
 end
 
+-- Every number the seal or the chain hashes goes through here, never tostring.
+--
+-- Lua 5.1 has a signed zero, and tostring prints -0 as "-0". SavedVariables is
+-- what makes that matter. The file loads as one chunk, and the compiler's table
+-- of numeric constants treats -0 and 0 as the same key, so whichever zero comes
+-- first in the file decides the sign every zero in it is read back with. A
+-- counter sealed as "0" could come back as "-0" at the next login and fail its
+-- own checksum -- and since any change to the order of the file could flip it,
+-- updating the addon was the usual trigger. "%d" prints both zeros as "0".
 local function EncodeValue(value)
     local valueType = type(value)
     if valueType == "number" then
@@ -127,9 +139,12 @@ local function DurabilityDigest(record)
     local parts = {}
     for slot, entry in pairs(state.slots) do
         if type(entry) == "table" then
-            parts[#parts + 1] = format("%s:%s:%s:%s:%s", tostring(slot),
-                tostring(entry.id or ""), tostring(entry.guid or ""),
-                tostring(entry.cur or ""), tostring(entry.max or ""))
+            -- EncodeValue, never tostring. See the note on EncodeValue: a broken
+            -- item's durability is 0, and a 0 read back from SavedVariables
+            -- can come back as -0, which tostring renders differently.
+            parts[#parts + 1] = format("%s:%s:%s:%s:%s", EncodeValue(slot),
+                EncodeValue(entry.id), EncodeValue(entry.guid),
+                EncodeValue(entry.cur), EncodeValue(entry.max))
         end
     end
     sort(parts)
@@ -147,7 +162,7 @@ local function WarningsDigest(track)
     if type(warnings) ~= "table" then return "" end
     local parts = {}
     for kind, count in pairs(warnings) do
-        parts[#parts + 1] = tostring(kind) .. ":" .. tostring(count or 0)
+        parts[#parts + 1] = tostring(kind) .. ":" .. EncodeValue(count or 0)
     end
     sort(parts)
     return concat(parts, ";")
@@ -173,9 +188,9 @@ local function EconomyDigest(record)
     -- the other side. Copper and seconds are both whole-number quantities
     -- anyway, so nothing real is lost.
     return format("%s:%s:%s:%s:%s",
-        tostring(Seconds(money.last)), tostring(Seconds(money.lastPlayed)),
-        tostring(Seconds(money.unexplained)),
-        tostring(money.anomalies or 0), tostring(items.anomalies or 0))
+        EncodeValue(Seconds(money.last)), EncodeValue(Seconds(money.lastPlayed)),
+        EncodeValue(Seconds(money.unexplained)),
+        EncodeValue(money.anomalies or 0), EncodeValue(items.anomalies or 0))
 end
 
 -- Death-marked gear that was never destroyed, as one short string.
@@ -194,10 +209,10 @@ local function DeathLossDigest(record)
     for itemID, entry in pairs(pending) do
         if type(entry) == "table" then
             parts[#parts + 1] = string.format("%s:%s:%s:%s:%s",
-                tostring(itemID),
-                tostring(entry.at or ""),
-                tostring(entry.count or ""),
-                tostring(entry.seen or ""),
+                EncodeValue(itemID),
+                EncodeValue(Seconds(entry.at)),
+                EncodeValue(entry.count),
+                EncodeValue(entry.seen),
                 entry.recorded and "1" or "0")
         end
     end
@@ -363,7 +378,7 @@ function I.Append(eventType, payload)
     end
 
     local body = I.Canonical(payload)
-    local head = I.Hash(chain.head .. "|" .. chain.sequence .. "|" .. Escape(eventType) .. "|" .. played .. "|" .. body)
+    local head = I.Hash(chain.head .. "|" .. chain.sequence .. "|" .. Escape(eventType) .. "|" .. EncodeValue(played) .. "|" .. body)
     chain.head = head
 
     local events = chain.events
@@ -414,7 +429,7 @@ function I.Check(record)
         if current.s ~= previous.s + 1 then
             return false, "sequence gap"
         end
-        local expected = I.Hash(previous.h .. "|" .. current.s .. "|" .. Escape(current.t) .. "|" .. (current.p or 0) .. "|" .. (current.d or ""))
+        local expected = I.Hash(previous.h .. "|" .. current.s .. "|" .. Escape(current.t) .. "|" .. EncodeValue(current.p or 0) .. "|" .. (current.d or ""))
         if expected ~= current.h then
             return false, "event hash mismatch"
         end
@@ -445,28 +460,91 @@ function I.Genesis(record, originLabel)
     return chain.head
 end
 
--- Drop an integrity verdict this build can no longer stand behind.
+-- Lift every integrity verdict an earlier build wrote.
 --
--- Reached when the seal was written in a shape that no longer reproduces --
--- normally an addon update. The old verdict was a statement about a comparison
--- that cannot be made any more, so keeping it would mean holding a player to an
--- accusation nobody can now check. The record re-seals in the current shape and
--- is held to the check normally from the next login on.
-function I.ReleaseStaleVerdict(record)
+-- A seal mismatch is diagnostic only now (see I.Init), so a verdict reached
+-- from one has nothing left standing behind it -- whichever shape it was
+-- written in, and whether or not its hold was still counting down. Called at
+-- every login; on a record carrying no such verdict it does nothing.
+--
+-- What a track goes back to is what it was before the verdict landed, read from
+-- the chain: every verdict is a STATUS event carrying the evidence status it
+-- replaced. Where one integrity verdict was stacked on another, the walk keeps
+-- going back past them to the status the first one replaced.
+local function PreVerdictEvidence(record, trackName)
+    local events = record.chain and record.chain.events
+    if type(events) ~= "table" then return nil end
+
+    local found
+    for index = #events, 1, -1 do
+        local event = events[index]
+        local body = type(event) == "table" and event.t == "STATUS" and event.d
+        if type(body) == "string" and body:match("track=(%a+)") == trackName then
+            if not body:find("reason=integrity:", 1, true) then break end
+            found = body:match("from=(%u+)") or found
+        end
+    end
+    if found and V.StatusRank(found) > 0 then return found end
+    return nil
+end
+
+-- Used only when the chain no longer holds the verdict, having rolled it off.
+-- Mirrors Migration's gap release: a track that was certified before and has
+-- nothing else recorded against it goes back to VERIFIED, one that was not goes
+-- to UNCERTAIN. A track with anything else on record is not guessed at -- it is
+-- parked SUSPENDED behind the usual clean-play hold instead.
+local function FallbackEvidence(record, track, trackName)
+    local nothingElse = not V.Time or not V.Time.NothingElseRecorded
+        or V.Time.NothingElseRecorded(record, trackName)
+    if not nothingElse then return V.STATUS.SUSPENDED end
+
+    local wasCertified
+    if trackName == "difficulty" then
+        wasCertified = (tonumber(track.highestVerifiedTier) or 0) >= 1
+    else
+        wasCertified = track.claimed and not track.claimLapsed
+    end
+    return wasCertified and V.STATUS.VERIFIED or V.STATUS.UNCERTAIN
+end
+
+function I.ReleaseIntegrityVerdicts(record)
     if not record then return false end
 
     local released = false
     for _, trackName in ipairs({ "difficulty", "selfFound" }) do
         local track = record[trackName]
-        if track and track.integrityHold then
-            track.integrityHold = nil
-            track.statusReason = nil
-            -- Restore decides for itself whether the track is actually
-            -- suspended, so there is no second guess to get wrong here.
-            if V.Restore then
-                V.Restore(trackName, "integrity verdict no longer applies")
+        if type(track) == "table" then
+            local reason = track.evidenceReason or track.statusReason
+            local fromIntegrity = type(reason) == "string"
+                and reason:sub(1, 10) == "integrity:"
+
+            if track.integrityHold or fromIntegrity then
+                track.integrityHold = nil
+
+                -- Covers every shape an integrity verdict has been written in:
+                -- SUSPENDED with a hold (the current one), and UNVERIFIED with or
+                -- without a hold (older builds, which nothing else ever lifts, so
+                -- the checksum message reappeared on every login). FAILED is left
+                -- alone: a failure is observed evidence, never the seal's doing.
+                local evidence = track.evidenceStatus or track.status
+                if fromIntegrity and evidence ~= V.STATUS.FAILED then
+                    local restored = PreVerdictEvidence(record, trackName)
+                        or FallbackEvidence(record, track, trackName)
+                    track.evidenceStatus = restored
+                    track.evidenceReason = nil
+                    track.statusReason = nil
+                    if restored == V.STATUS.SUSPENDED then
+                        local tracked = (record.time and record.time.trackedSinceAnchor) or 0
+                        track.integrityHold = tracked + (V.INTEGRITY_RESTORE_TRACKED or 1800)
+                    end
+                    I.Append("INTEGRITY_RELEASE", {
+                        track = trackName,
+                        from = evidence,
+                        to = restored,
+                    })
+                end
+                released = true
             end
-            released = true
         end
     end
 
@@ -475,6 +553,10 @@ function I.ReleaseStaleVerdict(record)
         record.tamperAt = nil
         released = true
     end
+
+    -- Re-derived at once, so the status shown this session is the one the
+    -- restored evidence and the live components produce together.
+    if released and V.ComposeAll then V.ComposeAll() end
     return released
 end
 
@@ -486,41 +568,36 @@ function I.Init()
     if not record then return end
 
     local ok, reason, stale = I.Check(record)
-    if ok and stale then
-        -- Nothing to compare against. Clear anything a previous build concluded
-        -- from a comparison this one cannot repeat, then adopt the record.
-        if I.ReleaseStaleVerdict(record) then
-            print("|cffff4444Rustcore:|r Verification restored: the previous integrity "
-                .. "warning came from an older build's bookkeeping, not from your record.")
-        end
-        I.Seal(record)
-        return
-    end
-    if not ok then
-        -- Suspended, not ended.
-        --
-        -- A mismatch says Rustcore cannot vouch for the saved history. It does
-        -- not say the player edited anything -- twice now it has been Rustcore's
-        -- own bookkeeping -- and UNVERIFIED is terminal, so that verdict turned
-        -- an addon bug into a permanently dead run with no way back.
-        --
-        -- SUSPENDED costs the certification just the same, and it comes back
-        -- after a stretch of clean, observed play. Someone who really did edit
-        -- their SavedVariables gains nothing by it and waits out the same
-        -- half hour; someone Rustcore wronged recovers on their own.
-        record.tamperReason = reason
-        record.tamperAt = time and time() or 0
 
-        local tracked = (record.time and record.time.trackedSinceAnchor) or 0
-        local required = tracked + (V.INTEGRITY_RESTORE_TRACKED or 1800)
-        for _, trackName in ipairs({ "difficulty", "selfFound" }) do
-            local track = record[trackName]
-            if track then
-                if V.SetStatus(trackName, V.STATUS.SUSPENDED, "integrity: " .. reason) then
-                    track.integrityHold = required
-                end
-            end
-        end
-        I.Seal(record)
+    -- Diagnostic only. A mismatch is written down for /rcverify and nothing
+    -- else: it does not suspend certification, does not print, and is not held
+    -- against the character.
+    --
+    -- The seal cannot tell tampering from Rustcore's own mistakes, and Rustcore
+    -- has made several: writes that were never sealed, digests whose contents
+    -- changed under an unchanged fingerprint, and a signed zero SavedVariables
+    -- does not preserve. Every one of them reached players as an accusation.
+    -- Against that it stopped almost nothing, since the addon is plain Lua and
+    -- anyone willing to edit SavedVariables can recompute the seal. What
+    -- verification rests on is what Rustcore watches happen, not whether a file
+    -- hashes to itself.
+    if not ok then
+        record.integrityDiagnostic = { reason = reason, at = time and time() or 0 }
+    elseif not stale then
+        -- A clean comparison supersedes an old finding. A stale one compared
+        -- nothing, so it leaves the last real finding where it is.
+        record.integrityDiagnostic = nil
     end
+
+    -- Earlier builds did treat a mismatch as a verdict. Those are lifted here --
+    -- after the check has had its look, so that lifting them, which writes to
+    -- the record, cannot hide what the check just found.
+    if I.ReleaseIntegrityVerdicts(record) then
+        print("|cffff4444Rustcore:|r Verification restored: a checksum warning from an "
+            .. "earlier Rustcore version no longer affects this character.")
+    end
+
+    -- Re-stamped either way, so the next login compares against the state this
+    -- session started from rather than reporting the same finding forever.
+    I.Seal(record)
 end

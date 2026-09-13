@@ -210,6 +210,7 @@ local DEPENDENT_TOGGLES = {
     { parentKey = "showStatsWindow",    field = "cbStatsColoredNumbers" },
     { parentKey = "showStatsWindow",    field = "cbStatsTitles" },
     { parentKey = "showStatsWindow",    field = "cbStatsIcons" },
+    { parentKey = "showStatsWindow",    field = "cbStatsLongName" },
     { parentKey = "showDurabilityHUD",  field = "cbDurShowAll" },
     { parentKey = "showDurabilityHUD",  field = "cbDurHorizontal" },
     { parentKey = "showDurabilityHUD",  field = "cbDurBackground" },
@@ -316,6 +317,7 @@ local function RefreshCombatLockState(frame)
         frame.cbStatBroken,
         frame.cbStatDeaths,
         frame.cbStatBestItem,
+        frame.cbStatsLongName,
         frame.cbStatsColoredNumbers,
         frame.cbDragonPlayerFrame,
         frame.cbDragonTargetFrame,
@@ -353,7 +355,9 @@ end
 
 local function BuildOptionsFrame()
     local f = CreateFrame("Frame", "RustcoreOptionsFrame", UIParent, backdropTemplate)
-    f:SetSize(640, 580)
+    -- 604 tall: the Interface tab fills its page to within about 10px of the
+    -- bottom, and the Long Item Name row is what needed the extra height.
+    f:SetSize(640, 604)
     f:SetPoint("CENTER", 0, 20)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -668,22 +672,58 @@ local function BuildOptionsFrame()
     ApplyBodyFont(profileDesc, 14)
 
     -- Interface
+    --
+    -- Four sections, each after the first opening on a rule. The rules and the
+    -- one mid-page header sit at absolute offsets, the convention the other
+    -- pages use; everything inside a section chains off its opener. The page is
+    -- a fixed 430px with no scroll and the last stats row lands near -420, so
+    -- there is almost no room left to add rows below.
+    --
+    -- Every rule gets 10px of clear space above it, and the opener below it
+    -- 9px (a toggle) or 12px (a header). Headers are 18px tall -- BPpong's
+    -- line height at the 17px MakeHeader sets -- which is what the absolute
+    -- offsets below are measured against.
+    --
+    -- Durability HUD and Stats Window open on their own "Show ..." toggle
+    -- rather than a header: the toggle already names the section, and a header
+    -- above each would cost the height the page does not have.
     local featuresHeader = MakeHeader(interfaceContent, "Features", -20)
     local cbMinimap = MakeCheckbox(interfaceContent,
         "Show Minimap Button",
         "Show or hide the Rustcore minimap button.",
         featuresHeader, -6, "showMinimapButton")
 
+    -- Portrait Visuals, both options on one row in the page's usual two
+    -- columns. Measured from the font: at the 14px sub-option size the longer
+    -- label, "Target Frame Verification", is 130px, so from the right column's
+    -- x=284 it ends near 414, inside the page's 442. At the full 17px size it
+    -- would not fit, which is why these use the smaller style.
+    MakeRule(interfaceContent, -80)
+    local portraitHeader = MakeHeader(interfaceContent, "Portrait Visuals", -96)
+
+    local cbDragonPlayerFrame = MakeCheckbox(interfaceContent,
+        "Player Frame Verification",
+        "Shows a dragon on your own player frame reflecting your current difficulty tier.",
+        portraitHeader, -4, "dragonPlayerFrame", 0, 20, 14)
+
+    local cbDragonTargetFrame = MakeCheckbox(interfaceContent,
+        "Target Frame Verification",
+        "When you target a player who also runs Rustcore, shows their difficulty dragon on the target frame and, if they are verified Self-Found, their Self-Found icon. Turning it off hides both. Also applies when targeting yourself.",
+        portraitHeader, -4, "dragonTargetFrame", 234, 20, 14)
+
+    -- Durability HUD. The rule sits at x=20, so the +6 puts the toggle back on
+    -- the page's usual x=26 column.
+    local durabilityRule = MakeRule(interfaceContent, -148)
+
     local cbDurHUD = MakeCheckbox(interfaceContent,
         "Show Durability HUD",
         "Replaces WoW's native durability frame with per-slot artwork. Only slots near 0 durability are shown by default. Reload UI to restore the original durability frame after disabling.",
-        cbMinimap, -4, "showDurabilityHUD")
+        durabilityRule, -9, "showDurabilityHUD", 6)
 
-    -- Two columns under the HUD toggle, the same shape the Self-Found block
-    -- uses: the settings that tune the layout run down the left, and the
-    -- layout choice itself sits alone on the right. Declared first here but
-    -- anchored to the second column -- both columns hang off cbDurHUD at the
-    -- same yOff, so source order doesn't set what lands where, xOff does.
+    -- Two columns under the HUD toggle: how the stack behaves down the left,
+    -- how the panel is drawn down the right. Declared first here but anchored
+    -- to the second column -- both columns hang off cbDurHUD at the same yOff,
+    -- so source order doesn't set what lands where, xOff does.
     local cbDurHorizontal = MakeCheckbox(interfaceContent,
         "Horizontal Display",
         "Lays the durability counters out in a single row instead of a vertical stack. The row grows leftward from the HUD's right edge.",
@@ -711,13 +751,16 @@ local function BuildOptionsFrame()
 
     local cbDurTitle = MakeCheckbox(interfaceContent,
         "Panel Title",
-        "Puts a \"Durability\" heading across the top of the durability HUD. One heading for the whole panel, not one per counter.",
-        cbDurReverseOrder, -3, "durHUDShowTitle", 0, 20, 14)
+        "Puts headings on the durability HUD: one \"Durability\" heading across the top of a vertical stack, or the slot name above each counter in Horizontal Display.",
+        cbDurBackground, -3, "durHUDShowTitle", 0, 20, 14)
+
+    -- Stats Window. Same arrangement as the section above.
+    local statsRule = MakeRule(interfaceContent, -266)
 
     local cbStats = MakeCheckbox(interfaceContent,
         "Show Stats Window",
         "Show or hide the Rustcore item loss stats window.",
-        cbDurTitle, -7, "showStatsWindow", -34)
+        statsRule, -9, "showStatsWindow", 6)
 
     local cbStatsHorizontal = MakeCheckbox(interfaceContent,
         "Horizontal Display",
@@ -759,15 +802,10 @@ local function BuildOptionsFrame()
         "Show the highest item level piece this character has lost.",
         cbStatDeaths, -3, "statShowBestItem", 0, 20, 14)
 
-    local cbDragonPlayerFrame = MakeCheckbox(interfaceContent,
-        "Dragon on Player Frame",
-        "Shows a dragon on your own player frame that reflects your current difficulty tier.",
-        cbStatBestItem, -7, "dragonPlayerFrame", -34)
-
-    local cbDragonTargetFrame = MakeCheckbox(interfaceContent,
-        "Dragon on Target Frame",
-        "Shows a dragon on the target frame reflecting the difficulty tier of the targeted player, when they also run Rustcore. Also shown when targeting yourself.",
-        cbDragonPlayerFrame, -7, "dragonTargetFrame")
+    local cbStatsLongName = MakeCheckbox(interfaceContent,
+        "Long Item Name",
+        "Shows the best item lost in the long named frame on a row of its own, instead of as a counter. In the vertical layout the other counters move into two columns above it.",
+        cbStatBestItem, -3, "statsLongItemName", 0, 20, 14)
 
     -- Notifications
     local deathlogHeader = MakeHeader(notificationsContent, "Death Log", -20)
@@ -1346,6 +1384,7 @@ local function BuildOptionsFrame()
     f.cbStatBroken  = cbStatBroken
     f.cbStatDeaths  = cbStatDeaths
     f.cbStatBestItem = cbStatBestItem
+    f.cbStatsLongName = cbStatsLongName
     f.cbStatsColoredNumbers = cbStatsColoredNumbers
     f.cbDeathlog = cbDeathlog
     f.cbDeathlogLevel = cbDeathlogLevel
@@ -1428,6 +1467,7 @@ local function BuildOptionsFrame()
         self.cbStatBroken:Refresh()
         self.cbStatDeaths:Refresh()
         self.cbStatBestItem:Refresh()
+        self.cbStatsLongName:Refresh()
         self.cbStatsColoredNumbers:Refresh()
         self.cbDragonPlayerFrame:Refresh()
         self.cbDragonTargetFrame:Refresh()
