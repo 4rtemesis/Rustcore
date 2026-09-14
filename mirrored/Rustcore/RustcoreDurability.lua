@@ -813,6 +813,13 @@ end
 local HUD_MIN_SCALE = 0.6
 local HUD_MAX_SCALE = 2.0
 local HUD_RESIZE_TOOLTIP = "Left click and drag to resize. Right click to reset the size."
+-- Offsets from the cursor to the top-left corner of the grip's tooltip, in
+-- UIParent units. ANCHOR_CURSOR draws above the cursor, which on this corner
+-- means over the grip the cursor is resting on, so the tooltip is placed by
+-- hand instead: far enough below to clear both the cursor arrow and the 16px
+-- grip under it, and far enough right to clear the arrow's width.
+local GRIP_TOOLTIP_X = 14
+local GRIP_TOOLTIP_Y = -22
 
 -- In a horizontal row the grip lives diagonally opposite the pinned corner; in
 -- a vertical stack it lives on the right edge at the growing end (see
@@ -950,10 +957,34 @@ local function BuildHUD()
     -- Same grip, textures, hover reveal and clicks as the stats window's, so
     -- the two resize the same way to the hand. UpdateHUD moves both the grip
     -- and its hotspot to whichever corner is free.
+    --
+    -- The tooltip is the one thing done differently here: it is placed below
+    -- the cursor rather than with ANCHOR_CURSOR, which draws above the cursor
+    -- and so sat over the grip the cursor is resting on. A point has to exist
+    -- before Show for the tooltip to lay out, so it is set once from the cursor
+    -- and then corrected with the measured size: pulled left if it would run
+    -- off the right edge, flipped above the cursor if there is no room below.
+    -- The flip keeps the same clearance, just on the other side, so the grip
+    -- stays visible either way.
     local function ShowGripTooltip(owner)
-        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR", 0, -32)
+        local scale = UIParent:GetEffectiveScale()
+        local cursorX, cursorY = GetCursorPosition()
+        cursorX, cursorY = cursorX / scale, cursorY / scale
+
+        GameTooltip:SetOwner(owner, "ANCHOR_NONE")
+        GameTooltip:ClearAllPoints()
+        GameTooltip:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+            cursorX + GRIP_TOOLTIP_X, cursorY + GRIP_TOOLTIP_Y)
         GameTooltip:SetText(HUD_RESIZE_TOOLTIP, nil, nil, nil, nil, true)
         GameTooltip:Show()
+
+        local x = math.min(cursorX + GRIP_TOOLTIP_X, UIParent:GetWidth() - GameTooltip:GetWidth())
+        local y = cursorY + GRIP_TOOLTIP_Y
+        if y - GameTooltip:GetHeight() < 0 then
+            y = cursorY - GRIP_TOOLTIP_Y + GameTooltip:GetHeight()
+        end
+        GameTooltip:ClearAllPoints()
+        GameTooltip:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", math.max(x, 0), y)
     end
 
     local grip = CreateFrame("Button", nil, f)

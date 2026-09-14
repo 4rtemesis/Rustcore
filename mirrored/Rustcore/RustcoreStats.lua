@@ -127,14 +127,13 @@ local TITLE_COLOR = { 1, 0.82, 0 }
 local TITLE_SHADOW_OFFSET = 1
 local TITLE_SHADOW_ALPHA = 1
 
--- The cracked frame the deletion wheel puts on doomed gear, at the ratio it
--- uses there (36 around a 32px icon).
-local BROKEN_OVERLAY_SIZE = 27
--- The overlay is drained of colour and then multiplied by this, which turns it a
--- mid-light grey. Desaturating first is what makes it grey rather than just a
--- darker version of its own colours; the multiplier is kept high so it reads as
--- weathered metal rather than a shadow over the icon.
-local BROKEN_OVERLAY_GREY = 0.78
+-- The rusted frame the durability HUD wipes down over a slot as it wears out,
+-- here at its full extent: the item is already gone, so it is as rusted as it
+-- gets. Same 27px over a 24px icon the HUD uses, and the same 1px left shift,
+-- so the mark reads as the one thing in both places. Drawn in its own colours,
+-- again like the HUD -- the rust is the point.
+local RUSTED_OVERLAY_SIZE = 27
+local RUSTED_OVERLAY_X = -1
 -- Default shade laid over an icon so it reads as sitting inside the frame
 -- rather than pasted on top. Counters can override it either way.
 local ICON_SHADE_ALPHA = 0.20
@@ -364,9 +363,9 @@ local ALL_COUNTERS = {
     {
         key = "best", setting = "statShowBestItem", colorTier = 3,
         isBestItem = true,
-        -- Wears the item's own icon, the cracked frame the deletion wheel puts
-        -- on doomed gear, and the item's name where the other rows have digits.
-        broken = true,
+        -- Wears the item's own icon under the rusted frame a slot earns at zero
+        -- durability, and the item's name where the other rows have digits.
+        rusted = true,
         showsName = true,
         icon = "Interface\\Icons\\INV_Misc_QuestionMark",
         title = "Best item lost",
@@ -461,7 +460,7 @@ local function FillRow(counter, row, stats)
             row.icon:SetTexture((link and GetItemIcon(link)) or counter.icon)
         end
         row.itemLink = link
-        if row.broken then row.broken:SetShown(link and true or false) end
+        if row.rusted then row.rusted:SetShown(link and true or false) end
         SetCounterName(row, ItemDisplayName(link) or "--", ItemRarityColor(link))
     else
         SetCounterDigits(row.digits, counter.value(stats), CounterColor(counter))
@@ -1008,7 +1007,7 @@ local function BuildStatsFrame()
         local row = CreateFrame("Frame", nil, textLayer)
         row:SetSize(variant.width, STAT_ROW_H)
 
-        local icon, brokenHost
+        local icon, rustedHost
         if variant.hasIcon then
             local iconBg = row:CreateTexture(nil, "BACKGROUND")
             iconBg:SetSize(ICON_IMAGE_SIZE, ICON_IMAGE_SIZE)
@@ -1041,21 +1040,19 @@ local function BuildStatsFrame()
                 shadow:SetColorTexture(0, 0, 0, shade)
             end
 
-            -- The cracked frame doomed gear wears on the deletion wheel. Level
-            -- +3, below the counter art, so the art still frames it -- the same
-            -- arrangement the durability HUD uses for its rust overlay.
-            if counter.broken then
-                brokenHost = CreateFrame("Frame", nil, row)
-                brokenHost:SetSize(BROKEN_OVERLAY_SIZE, BROKEN_OVERLAY_SIZE)
-                brokenHost:SetPoint("CENTER", row, "LEFT", ICON_CENTER_X, 0)
-                brokenHost:SetFrameLevel(row:GetFrameLevel() + 3)
-                brokenHost:EnableMouse(false)
-                local brokenTex = brokenHost:CreateTexture(nil, "OVERLAY")
-                brokenTex:SetAllPoints(brokenHost)
-                brokenTex:SetTexture(Rustcore.GetAssetPath("UI/Brokenframe copy.tga"))
-                brokenTex:SetDesaturation(1)
-                brokenTex:SetVertexColor(BROKEN_OVERLAY_GREY, BROKEN_OVERLAY_GREY, BROKEN_OVERLAY_GREY)
-                brokenHost:Hide()
+            -- The rust a slot wears once it reaches zero durability. Level +3,
+            -- below the counter art, so the art still frames it -- the same
+            -- arrangement the durability HUD uses for the same overlay.
+            if counter.rusted then
+                rustedHost = CreateFrame("Frame", nil, row)
+                rustedHost:SetSize(RUSTED_OVERLAY_SIZE, RUSTED_OVERLAY_SIZE)
+                rustedHost:SetPoint("CENTER", row, "LEFT", ICON_CENTER_X + RUSTED_OVERLAY_X, 0)
+                rustedHost:SetFrameLevel(row:GetFrameLevel() + 3)
+                rustedHost:EnableMouse(false)
+                local rustedTex = rustedHost:CreateTexture(nil, "OVERLAY")
+                rustedTex:SetAllPoints(rustedHost)
+                rustedTex:SetTexture(Rustcore.GetAssetPath("UI/rustedframe.tga"))
+                rustedHost:Hide()
             end
         end
 
@@ -1117,7 +1114,7 @@ local function BuildStatsFrame()
         row.digits = digits
         row.name = name
         row.nameBg = nameBg
-        row.broken = brokenHost
+        row.rusted = rustedHost
         row.title = title
         -- RefreshLayout decides which variant is on screen; until then neither
         -- is, so a row that is never shown cannot flash on the first frame.

@@ -521,7 +521,7 @@ local function SetNativeTargetAurasHidden(hidden)
 end
 
 local function IsVerifiedTarget()
-    -- Target Frame Verification governs everything Rustcore draws on the target
+    -- Target Verification governs everything Rustcore draws on the target
     -- frame, this icon included. Gating it here rather than in RefreshTargetIcon
     -- matters: this is the one test every aura-hiding path consults, so a
     -- verified target with the option off keeps its native auras. Gating any

@@ -125,7 +125,7 @@ local defaults = {
     -- counter; in the vertical layout the other counters go into two columns.
     statsLongItemName = false,
     dragonPlayerFrame = true, -- show a difficulty-tier dragon overlay on your own player frame
-    dragonTargetFrame = true,  -- "Target Frame Verification": the target's difficulty dragon and their Self-Found icon, together
+    dragonTargetFrame = true,  -- "Target Verification": the target's difficulty dragon and their Self-Found icon, together
     showDeathlogWindow = false, -- show the death log window listing other players' deaths
     showDeathlogLevel = true,   -- show the victim's level in each death log entry
     showDeathlogCount = true,   -- show how many items were lost

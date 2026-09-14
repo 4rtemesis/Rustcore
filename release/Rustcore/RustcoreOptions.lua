@@ -673,43 +673,49 @@ local function BuildOptionsFrame()
 
     -- Interface
     --
-    -- Four sections, each after the first opening on a rule. The rules and the
-    -- one mid-page header sit at absolute offsets, the convention the other
-    -- pages use; everything inside a section chains off its opener. The page is
-    -- a fixed 430px with no scroll and the last stats row lands near -420, so
-    -- there is almost no room left to add rows below.
+    -- Four sections, each after the first opening on a rule. The rules sit at
+    -- absolute offsets, the convention the other pages use; everything inside a
+    -- section chains off its opener. The page is a fixed 430px with no scroll
+    -- and the last stats row lands near -420, so there is almost no room left
+    -- to add rows below.
     --
-    -- Every rule gets 10px of clear space above it, and the opener below it
-    -- 9px (a toggle) or 12px (a header). Headers are 18px tall -- BPpong's
-    -- line height at the 17px MakeHeader sets -- which is what the absolute
-    -- offsets below are measured against.
+    -- Every rule gets 10px of clear space above it, and the opener below it 9px.
     --
-    -- Durability HUD and Stats Window open on their own "Show ..." toggle
-    -- rather than a header: the toggle already names the section, and a header
-    -- above each would cost the height the page does not have.
-    local featuresHeader = MakeHeader(interfaceContent, "Features", -20)
+    -- No section carries a header. Each one's own options name it plainly
+    -- enough, and a header above each would cost the height the page does not
+    -- have. The top two sections hold a single row apiece, so rather than
+    -- hanging off a header they are centred in the band between the page top
+    -- (or their own rule) and the rule below.
     local cbMinimap = MakeCheckbox(interfaceContent,
         "Show Minimap Button",
         "Show or hide the Rustcore minimap button.",
-        featuresHeader, -6, "showMinimapButton")
+        interfaceContent, 0, "showMinimapButton")
+    -- Nothing above it to chain from, so it is placed outright: 26px tall,
+    -- centred on -40, the middle of the band above the -80 rule.
+    cbMinimap:ClearAllPoints()
+    cbMinimap:SetPoint("TOPLEFT", interfaceContent, "TOPLEFT", 26, -27)
 
-    -- Portrait Visuals, both options on one row in the page's usual two
-    -- columns. Measured from the font: at the 14px sub-option size the longer
-    -- label, "Target Frame Verification", is 130px, so from the right column's
-    -- x=284 it ends near 414, inside the page's 442. At the full 17px size it
-    -- would not fit, which is why these use the smaller style.
-    MakeRule(interfaceContent, -80)
-    local portraitHeader = MakeHeader(interfaceContent, "Portrait Visuals", -96)
+    -- Portrait visuals, both options on one row in the page's usual two
+    -- columns, at the same full size as the section openers below. Measured
+    -- from the font: at 17px the longer label, "Target Verification", is about
+    -- 120px, so from the right column's label start at x=290 it ends near 410,
+    -- inside the page's 442. The old names carried "Frame" as well and would
+    -- have run past that edge, which is what the shorter pair buys -- the frame
+    -- each one applies to is what the tooltips open with.
+    local portraitRule = MakeRule(interfaceContent, -80)
 
+    -- Centred in the band between this rule and the one at -148. The rule sits
+    -- at x=20, so the +6 and +240 put the two back on the page's x=26 and x=260
+    -- columns.
     local cbDragonPlayerFrame = MakeCheckbox(interfaceContent,
-        "Player Frame Verification",
+        "Player Verification",
         "Shows a dragon on your own player frame reflecting your current difficulty tier.",
-        portraitHeader, -4, "dragonPlayerFrame", 0, 20, 14)
+        portraitRule, -17, "dragonPlayerFrame", 6)
 
     local cbDragonTargetFrame = MakeCheckbox(interfaceContent,
-        "Target Frame Verification",
+        "Target Verification",
         "When you target a player who also runs Rustcore, shows their difficulty dragon on the target frame and, if they are verified Self-Found, their Self-Found icon. Turning it off hides both. Also applies when targeting yourself.",
-        portraitHeader, -4, "dragonTargetFrame", 234, 20, 14)
+        portraitRule, -17, "dragonTargetFrame", 240)
 
     -- Durability HUD. The rule sits at x=20, so the +6 puts the toggle back on
     -- the page's usual x=26 column.
