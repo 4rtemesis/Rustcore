@@ -1001,9 +1001,22 @@ local function BuildOptionsFrame()
     -- The Tempered Souls supporters section lived here. Removed for now; the
     -- page ends at the CurseForge line above.
 
-    local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown", gameplayPage, "UIDropDownMenuTemplate")
+    -- Blizzard removed the entire UIDropDownMenu family from the modern
+    -- client in 11.0. Era and TBC Anniversary still have it, and WoW
+    -- Forever's lineage has not been published, so this keeps the original
+    -- templated dropdown exactly as it was wherever the API is present and
+    -- falls back to a small hand-built list where it isn't. On the current
+    -- target clients hasDropDownAPI is true, so nothing below changes.
+    local hasDropDownAPI = RustcoreCompat.caps.uiDropDownMenu
+
+    local importDropdown = CreateFrame("Frame", "RustcoreImportProfileDropdown",
+        gameplayPage, hasDropDownAPI and "UIDropDownMenuTemplate" or nil)
     importDropdown:SetPoint("TOPLEFT", profileDesc, "BOTTOMLEFT", 0, -10)
-    UIDropDownMenu_SetWidth(importDropdown, 190)
+    if hasDropDownAPI then
+        UIDropDownMenu_SetWidth(importDropdown, 190)
+    else
+        importDropdown:SetSize(190, 26)
+    end
 
     local ddName = importDropdown:GetName()
     local ddLeft, ddMiddle, ddRight, ddButton, ddText, ddIcon =
@@ -1023,12 +1036,16 @@ local function BuildOptionsFrame()
     local PLACEHOLDER_COLOR = { 0.6, 0.6, 0.6 }
     local SELECTED_COLOR = { 1, 1, 1 }
 
-    if ddText then
-        ddText:ClearAllPoints()
-        ddText:SetJustifyH("LEFT")
-        ddText:SetPoint("LEFT", ddBg, "LEFT", 10, -1)
-        ApplyBodyFont(ddText, 14)
+    -- With no template there is no FontString to borrow, so make one. From
+    -- here down ddText is guaranteed, which is why the old `if ddText then`
+    -- guards further down are gone rather than merely left in place.
+    if not ddText then
+        ddText = importDropdown:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     end
+    ddText:ClearAllPoints()
+    ddText:SetJustifyH("LEFT")
+    ddText:SetPoint("LEFT", ddBg, "LEFT", 10, -1)
+    ApplyBodyFont(ddText, 14)
 
     local ddClick = CreateFrame("Button", nil, importDropdown)
     ddClick:SetAllPoints(ddBg)
@@ -1043,6 +1060,30 @@ local function BuildOptionsFrame()
     local LAYOUT_IMPORT_KEYS = { "durHUDPos", "statsWindowPoint", "statsWindowSize", "minimapAngle", "deathlogWindowPoint", "deathlogWindowSize" }
     local selectedProfileKey = nil
 
+    -- Every stored profile except the one being played, which is the import
+    -- target rather than a source. Shared by both dropdown paths so the two
+    -- can never disagree about what is offered.
+    local function ImportableProfiles()
+        local list = {}
+        local profiles = RustcoreDB.profiles or {}
+        local currentKey = Rustcore.GetCharacterKey()
+        for key, profile in pairs(profiles) do
+            if key ~= currentKey then
+                list[#list + 1] = { key = key, label = profile.characterLabel or key }
+            end
+        end
+        table.sort(list, function(a, b) return a.label < b.label end)
+        return list
+    end
+
+    local function SetDropdownText(text)
+        if hasDropDownAPI then
+            UIDropDownMenu_SetText(importDropdown, text)
+        else
+            ddText:SetText(text)
+        end
+    end
+
     local function RefreshImportDropdownText()
         local profiles = RustcoreDB.profiles or {}
         local currentKey = Rustcore.GetCharacterKey()
@@ -1050,62 +1091,126 @@ local function BuildOptionsFrame()
             selectedProfileKey = nil
         end
         if selectedProfileKey and profiles[selectedProfileKey] then
-            UIDropDownMenu_SetText(importDropdown, profiles[selectedProfileKey].characterLabel or selectedProfileKey)
-            if ddText then ddText:SetTextColor(unpack(SELECTED_COLOR)) end
+            SetDropdownText(profiles[selectedProfileKey].characterLabel or selectedProfileKey)
+            ddText:SetTextColor(unpack(SELECTED_COLOR))
         else
-            UIDropDownMenu_SetText(importDropdown, "Click to select")
-            if ddText then ddText:SetTextColor(unpack(PLACEHOLDER_COLOR)) end
+            SetDropdownText("Click to select")
+            ddText:SetTextColor(unpack(PLACEHOLDER_COLOR))
         end
     end
 
-    ddClick:SetScript("OnClick", function()
-        if SettingsLocked() then return end
-        ToggleDropDownMenu(1, nil, importDropdown, importDropdown, 0, 0)
-    end)
+    if hasDropDownAPI then
+        ddClick:SetScript("OnClick", function()
+            if SettingsLocked() then return end
+            ToggleDropDownMenu(1, nil, importDropdown, importDropdown, 0, 0)
+        end)
 
-    local function ApplyDropdownListStyle(level, value, dropDownFrame)
-        if dropDownFrame ~= importDropdown then return end
-        if UIDROPDOWNMENU_OPEN_MENU ~= ddName then return end
-        level = level or 1
-        local listFrame = _G["DropDownList"..level]
-        if not (listFrame and listFrame:IsShown()) then return end
-        if level == 1 then
-            listFrame:ClearAllPoints()
-            listFrame:SetPoint("TOP", ddBg, "BOTTOM", -6, 2)
-            if listFrame.SetBackdrop then listFrame:SetBackdrop(nil) end
-            local listBackdrop = _G[listFrame:GetName().."Backdrop"]
-            if listBackdrop then
-                listBackdrop:Hide()
-                if listBackdrop.SetBackdrop then listBackdrop:SetBackdrop(nil) end
+        local function ApplyDropdownListStyle(level, value, dropDownFrame)
+            if dropDownFrame ~= importDropdown then return end
+            if UIDROPDOWNMENU_OPEN_MENU ~= ddName then return end
+            level = level or 1
+            local listFrame = _G["DropDownList"..level]
+            if not (listFrame and listFrame:IsShown()) then return end
+            if level == 1 then
+                listFrame:ClearAllPoints()
+                listFrame:SetPoint("TOP", ddBg, "BOTTOM", -6, 2)
+                if listFrame.SetBackdrop then listFrame:SetBackdrop(nil) end
+                local listBackdrop = _G[listFrame:GetName().."Backdrop"]
+                if listBackdrop then
+                    listBackdrop:Hide()
+                    if listBackdrop.SetBackdrop then listBackdrop:SetBackdrop(nil) end
+                end
+            end
+            for i = 1, UIDROPDOWNMENU_MAXBUTTONS do
+                local btn = _G["DropDownList"..level.."Button"..i]
+                if not btn or not btn:IsShown() then break end
+                local btnText = _G[btn:GetName().."NormalText"]
+                if btnText then ApplyBodyFont(btnText, 14) end
             end
         end
-        for i = 1, UIDROPDOWNMENU_MAXBUTTONS do
-            local btn = _G["DropDownList"..level.."Button"..i]
-            if not btn or not btn:IsShown() then break end
-            local btnText = _G[btn:GetName().."NormalText"]
-            if btnText then ApplyBodyFont(btnText, 14) end
-        end
-    end
-    hooksecurefunc("ToggleDropDownMenu", ApplyDropdownListStyle)
+        hooksecurefunc("ToggleDropDownMenu", ApplyDropdownListStyle)
 
-    UIDropDownMenu_Initialize(importDropdown, function(self, level)
-        local profiles = RustcoreDB.profiles or {}
-        local currentKey = Rustcore.GetCharacterKey()
-        for key, profile in pairs(profiles) do
-            if key ~= currentKey then
+        UIDropDownMenu_Initialize(importDropdown, function(self, level)
+            for _, entry in ipairs(ImportableProfiles()) do
                 local info = UIDropDownMenu_CreateInfo()
-                info.text = profile.characterLabel or key
-                info.value = key
+                info.text = entry.label
+                info.value = entry.key
                 info.justificationH = "RIGHT"
                 info.func = function()
-                    selectedProfileKey = key
+                    selectedProfileKey = entry.key
                     RefreshImportDropdownText()
                     CloseDropDownMenus()
                 end
                 UIDropDownMenu_AddButton(info, level)
             end
+        end)
+    else
+        -- Hand-built stand-in for the removed API. Deliberately plain: its
+        -- only job is to let someone pick one character name, so it skips
+        -- the templated dropdown's submenus, scrolling and backdrop styling
+        -- entirely and just stacks one button per importable profile.
+        local ROW_H = 20
+
+        local fallbackList = CreateFrame("Frame", nil, importDropdown)
+        fallbackList:SetPoint("TOP", ddBg, "BOTTOM", 0, 2)
+        fallbackList:SetWidth(190)
+        fallbackList:SetFrameStrata("DIALOG")
+        fallbackList:SetFrameLevel(importDropdown:GetFrameLevel() + 10)
+        fallbackList:Hide()
+
+        local fallbackBg = fallbackList:CreateTexture(nil, "BACKGROUND")
+        fallbackBg:SetAllPoints(fallbackList)
+        fallbackBg:SetColorTexture(0.05, 0.04, 0.03, 0.95)
+
+        local rows = {}
+
+        -- Rows are pooled, not rebuilt, so reopening the list doesn't leak
+        -- a new Button every time.
+        local function RebuildFallbackList()
+            local entries = ImportableProfiles()
+            for i = 1, #entries do
+                local row = rows[i]
+                if not row then
+                    row = CreateFrame("Button", nil, fallbackList)
+                    row:SetSize(190, ROW_H)
+                    row:SetPoint("TOPLEFT", fallbackList, "TOPLEFT", 0, -(i - 1) * ROW_H)
+                    row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                    row.label:SetPoint("LEFT", row, "LEFT", 10, 0)
+                    row.label:SetJustifyH("LEFT")
+                    ApplyBodyFont(row.label, 14)
+                    row:SetScript("OnEnter", function(self)
+                        self.label:SetTextColor(1, 0.82, 0.3)
+                    end)
+                    row:SetScript("OnLeave", function(self)
+                        self.label:SetTextColor(1, 1, 1)
+                    end)
+                    row:SetScript("OnClick", function(self)
+                        selectedProfileKey = self.profileKey
+                        RefreshImportDropdownText()
+                        fallbackList:Hide()
+                    end)
+                    rows[i] = row
+                end
+                row.profileKey = entries[i].key
+                row.label:SetText(entries[i].label)
+                row.label:SetTextColor(1, 1, 1)
+                row:Show()
+            end
+            for i = #entries + 1, #rows do rows[i]:Hide() end
+
+            fallbackList:SetHeight(math.max(#entries * ROW_H, 1))
+            return #entries
         end
-    end)
+
+        ddClick:SetScript("OnClick", function()
+            if SettingsLocked() then return end
+            if fallbackList:IsShown() then
+                fallbackList:Hide()
+            elseif RebuildFallbackList() > 0 then
+                fallbackList:Show()
+            end
+        end)
+    end
 
     importBtn:SetScript("OnClick", function()
         if not selectedProfileKey then return end

@@ -267,7 +267,7 @@ local function PackBestItem(link)
 end
 
 -- Rebuild an item string the client can resolve. The display name and full link
--- come back from GetItemInfo rather than travelling in the payload.
+-- come back from RustcoreCompat.GetItemInfo rather than travelling in the payload.
 local function UnpackBestItem(text)
     if type(text) ~= "string" or text == "" then return nil end
     local id, suffix, unique = text:match("^(%w+)%" .. GROUP_SEP .. "(%-?%d+)%" .. GROUP_SEP .. "(%w+)$")
@@ -277,7 +277,7 @@ local function UnpackBestItem(text)
     return string.format("item:%d:0:0:0:0:0:%d:%d", itemID, tonumber(suffix) or 0, uniqueID)
 end
 
--- Resolve `itemString` to a real link and store it. GetItemInfo answers nil for
+-- Resolve `itemString` to a real link and store it. RustcoreCompat.GetItemInfo answers nil for
 -- an item the client has not cached, so the lookup is retried when the server
 -- sends it.
 local function ApplyBestItemLink(itemString, ilvl)
@@ -286,7 +286,7 @@ local function ApplyBestItemLink(itemString, ilvl)
     local function store()
         local stats = X.GetStatsTable and X.GetStatsTable()
         if not stats then return false end
-        local _, link = GetItemInfo(itemString)
+        local _, link = RustcoreCompat.GetItemInfo(itemString)
         if not link then return false end
         stats.bestItemLostLink = link
         stats.bestItemLostIlvl = ilvl or stats.bestItemLostIlvl or 0
@@ -853,7 +853,7 @@ local function ApplyFields(decoded, serverPlayed, creditSeconds)
         stats.rustedItems    = HigherCount(stats.rustedItems, decoded.statRusted or 0)
         stats.deaths         = HigherCount(stats.deaths, decoded.statDeaths or 0)
         if (decoded.statIlvl or 0) > (tonumber(stats.bestItemLostIlvl) or 0) then
-            -- The link itself is rebuilt from the item id through GetItemInfo.
+            -- The link itself is rebuilt from the item id through RustcoreCompat.GetItemInfo.
             ApplyBestItemLink(decoded.bestItem, decoded.statIlvl)
         end
     end

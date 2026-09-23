@@ -45,7 +45,7 @@ end
 
 -- Reading "Conjured Item" -----------------------------------------------------
 --
--- There is no API that answers this. GetItemInfo exposes quality, type and
+-- There is no API that answers this. RustcoreCompat.GetItemInfo exposes quality, type and
 -- price but not the conjured flag, so the tooltip is the only place the client
 -- states it -- which is also where the player reads it, so the addon and the
 -- player are looking at exactly the same line.

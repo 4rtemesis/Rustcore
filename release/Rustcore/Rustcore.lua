@@ -311,15 +311,7 @@ local function RefreshSelfFoundStatsIcon()
 end
 
 local function GetBagItemLinkAndCount(bag, slot)
-    if C_Container and C_Container.GetContainerItemInfo then
-        local info = C_Container.GetContainerItemInfo(bag, slot)
-        if info then
-            return info.hyperlink, info.stackCount or 1
-        end
-    elseif GetContainerItemInfo then
-        local _, count, _, _, _, _, link = GetContainerItemInfo(bag, slot)
-        return link, count or 1
-    end
+    return RustcoreCompat.GetContainerItemLinkAndCount(bag, slot)
 end
 
 local function GetItemCountKey(link)
@@ -329,14 +321,9 @@ end
 
 local function CaptureBagSnapshot()
     local snapshot = {}
-    local maxBag = NUM_BAG_SLOTS or 4
+    local maxBag = RustcoreCompat.MaxBagIndex()
     for bag = 0, maxBag do
-        local slots = 0
-        if C_Container and C_Container.GetContainerNumSlots then
-            slots = C_Container.GetContainerNumSlots(bag) or 0
-        elseif GetContainerNumSlots then
-            slots = GetContainerNumSlots(bag) or 0
-        end
+        local slots = RustcoreCompat.GetContainerNumSlots(bag)
         for slot = 1, slots do
             local link, count = GetBagItemLinkAndCount(bag, slot)
             local key = GetItemCountKey(link)
@@ -546,7 +533,7 @@ end
 -- file runs before the client has necessarily finished setting that global up.
 local qualityByHex
 
--- GetItemInfo is the better answer whenever it has one, but it returns nil for
+-- RustcoreCompat.GetItemInfo is the better answer whenever it has one, but it returns nil for
 -- an item this client has never seen -- which is the ordinary case for a
 -- stranger's death arriving over the realm channel. The quality colour is baked
 -- into the link itself and is always present, so it is the fallback rather than
@@ -554,8 +541,8 @@ local qualityByHex
 function Rustcore.GetDeathItemQuality(link)
     if type(link) ~= "string" or link == "" then return nil end
 
-    if GetItemInfo then
-        local quality = select(3, GetItemInfo(link))
+    if RustcoreCompat.GetItemInfo then
+        local quality = select(3, RustcoreCompat.GetItemInfo(link))
         if quality then return quality end
     end
 
@@ -654,7 +641,7 @@ local function GetMainWeaponSlot()
     if class == "HUNTER" then
         return 18  -- ranged weapon
     elseif WAND_CLASSES[class] then
-        if GetInventoryItemLink("player", 18) then
+        if RustcoreCompat.GetInventoryItemLink("player", 18) then
             return 18
         end
         return 16
@@ -674,21 +661,21 @@ local function TakeSnapshot()
     wipe(combatSnapshot)
     local skipSlot = Rustcore.GetSetting("keepMainWeapon") and GetMainWeaponSlot() or nil
     snapshotWeaponSkipped = false
-    if skipSlot and GetInventoryItemLink("player", skipSlot) then
+    if skipSlot and RustcoreCompat.GetInventoryItemLink("player", skipSlot) then
         -- A broken item is ineligible anyway, so shielding it changed nothing.
-        local durCurrent, durMax = GetInventoryItemDurability(skipSlot)
+        local durCurrent, durMax = RustcoreCompat.GetInventoryItemDurability(skipSlot)
         local isBroken = durCurrent ~= nil and durMax ~= nil and durMax > 0 and durCurrent == 0
         snapshotWeaponSkipped = not isBroken
     end
     for _, slotId in ipairs(GEAR_SLOTS) do
         if slotId ~= skipSlot then
-            local link = GetInventoryItemLink("player", slotId)
+            local link = RustcoreCompat.GetInventoryItemLink("player", slotId)
             if link then
-                local durCurrent, durMax = GetInventoryItemDurability(slotId)
+                local durCurrent, durMax = RustcoreCompat.GetInventoryItemDurability(slotId)
                 local isBroken = durCurrent ~= nil and durMax ~= nil and durMax > 0 and durCurrent == 0
                 if not isBroken then
-                    local name, _, _, ilvl = GetItemInfo(link)
-                    local tex = GetInventoryItemTexture("player", slotId) or GetItemIcon(link)
+                    local name, _, _, ilvl = RustcoreCompat.GetItemInfo(link)
+                    local tex = RustcoreCompat.GetInventoryItemTexture("player", slotId) or RustcoreCompat.GetItemIcon(link)
                     combatSnapshot[#combatSnapshot + 1] = {
                         slot = slotId,
                         link = link,
@@ -757,7 +744,7 @@ local function FindHighestIlvlItem(items)
     local bestItem, bestIlvl = nil, -1
     for _, item in ipairs(items or {}) do
         if item and item.link then
-            local ilvl = select(4, GetItemInfo(item.link)) or 0
+            local ilvl = select(4, RustcoreCompat.GetItemInfo(item.link)) or 0
             if ilvl > bestIlvl then
                 bestItem = item
                 bestIlvl = ilvl

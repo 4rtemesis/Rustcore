@@ -1176,19 +1176,19 @@ local function UpdateHUD()
 
     for _, entry in ipairs(slotEntries) do
         local slot    = entry.slot
-        local link    = GetInventoryItemLink("player", slot)
+        local link    = RustcoreCompat.GetInventoryItemLink("player", slot)
         local visible = false
         local pct     = 1  -- default; overwritten when durability is read
 
         local identity = link and GetSlotIdentity(slot, link) or nil
 
         if link then
-            local current, maximum = GetInventoryItemDurability(slot)
+            local current, maximum = RustcoreCompat.GetInventoryItemDurability(slot)
             if current ~= nil and maximum ~= nil and maximum > 0 then
                 pct = current / maximum
                 local threshold = GetLowThresholdPct(maximum)
                 if showAll or pct <= threshold then
-                    local itemTex = GetInventoryItemTexture("player", slot)
+                    local itemTex = RustcoreCompat.GetInventoryItemTexture("player", slot)
                     local fallback = "Interface\\Icons\\INV_Misc_QuestionMark"
                     entry.frame.iconTex:SetTexture(itemTex or fallback)
                     entry.frame.sepiaTex:SetTexture(itemTex or fallback)
@@ -1457,7 +1457,14 @@ local function UpdateHUD()
             end
         end
         hudContainer:Show()
-        if DurabilityFrame then DurabilityFrame:Hide() end
+        -- :Hide() is protected on the modern client and blocked outright in
+        -- combat, so ask the backend before touching Blizzard's frame. When
+        -- the answer is no, the native frame simply stays up until the next
+        -- refresh out of combat - which is preferable to a blocked-action
+        -- error and a tainted execution path.
+        if DurabilityFrame and RustcoreCompat.CanTouchBlizzardFrames() then
+            DurabilityFrame:Hide()
+        end
     else
         hudContainer:Hide()
     end
@@ -1468,7 +1475,8 @@ end
 local function HookNativeDurabilityFrame()
     if not DurabilityFrame then return end
     DurabilityFrame:HookScript("OnShow", function(self)
-        if Rustcore.GetSetting("showDurabilityHUD") then
+        if Rustcore.GetSetting("showDurabilityHUD")
+            and RustcoreCompat.CanTouchBlizzardFrames() then
             self:Hide()
         end
     end)
@@ -1484,7 +1492,7 @@ evFrame:SetScript("OnEvent", function(_, event, unit)
     if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
     if not hudContainer then return end
 
-    -- Deferred one frame: GetInventoryItemDurability can still report the
+    -- Deferred one frame: RustcoreCompat.GetInventoryItemDurability can still report the
     -- previous item's value in the same tick the inventory-changed event
     -- fires, before the client's local item cache has caught up.
     C_Timer.After(0, UpdateHUD)

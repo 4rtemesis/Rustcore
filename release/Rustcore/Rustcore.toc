@@ -1,4 +1,14 @@
-## Interface: 11509, 20506
+## Interface: 11509, 16001, 20506, 120100
+# 11509 = Era 1.15.9,          16001 = WoW Forever beta 1.60.1
+# 20506 = TBC Anniversary 2.5.6, 120100 = retail 12.1.0
+#
+# All four are the client build strings from Battle.net .build.info run
+# through the standard major*10000 + minor*100 + patch encoding. Era and
+# Anniversary are known-good and confirm the formula; retail and Forever
+# are derived the same way. Drop a number here and that client reports the
+# addon as Incompatible rather than merely out of date, so keep all four
+# even while only some are being tested. Confirm Forever with /rccompat
+# once the beta is joinable.
 ## Title: Rustcore
 ## Notes: Disabled repair and deletes items on death.
 ## Author: Rustcore
@@ -6,6 +16,15 @@
 ## IconTexture: Interface\AddOns\Rustcore\RCicon.png
 ## SavedVariables: RustcoreDB
 
+# Client abstraction. Must load first - everything else asks it. Both
+# backends ship and both load; RustcoreCompat picks one at runtime rather
+# than at packaging time, because WoW Forever's TOC flavor suffix is not
+# published and it may well fall back to this file rather than a
+# flavor-specific one.
+RustcoreCompat.lua
+RustcoreCompatClassic.lua
+RustcoreCompatModern.lua
+RustcoreDiag.lua
 Rustcore.lua
 # Verification system (certification tracks, integrity chain, playtime)
 Verification\Core.lua

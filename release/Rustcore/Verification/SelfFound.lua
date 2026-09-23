@@ -44,28 +44,16 @@ end
 -- Slots 1-19: the whole paper doll in Classic, ammo and tabard included.
 local EQUIPMENT_SLOTS = 19
 
--- Mirrors CaptureBagSnapshot in Rustcore.lua: C_Container is the current API
--- and the loose globals are the pre-10.0 spelling still present on older
--- clients, so both are tried rather than assumed.
+-- Mirrors CaptureBagSnapshot in Rustcore.lua. Bag access goes through
+-- RustcoreCompat, so this file no longer has to know whether the client
+-- exposes C_Container or the older flat globals.
 local function BagItemCounts()
     local counts, total = {}, 0
-    local maxBag = NUM_BAG_SLOTS or 4
+    local maxBag = RustcoreCompat.MaxBagIndex()
     for bag = 0, maxBag do
-        local slots = 0
-        if C_Container and C_Container.GetContainerNumSlots then
-            slots = C_Container.GetContainerNumSlots(bag) or 0
-        elseif GetContainerNumSlots then
-            slots = GetContainerNumSlots(bag) or 0
-        end
+        local slots = RustcoreCompat.GetContainerNumSlots(bag)
         for slot = 1, slots do
-            local link, count
-            if C_Container and C_Container.GetContainerItemInfo then
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info then link, count = info.hyperlink, info.stackCount or 1 end
-            elseif GetContainerItemInfo then
-                local _, stack, _, _, _, _, hyperlink = GetContainerItemInfo(bag, slot)
-                link, count = hyperlink, stack or 1
-            end
+            local link, count = RustcoreCompat.GetContainerItemLinkAndCount(bag, slot)
             local id = link and link:match("item:(%d+)")
             if id then
                 counts[id] = (counts[id] or 0) + (count or 1)
@@ -79,7 +67,7 @@ end
 function SF.CaptureBaseline()
     local equipped = {}
     for slot = 1, EQUIPMENT_SLOTS do
-        local id = GetInventoryItemID and GetInventoryItemID("player", slot)
+        local id = RustcoreCompat.GetInventoryItemID and RustcoreCompat.GetInventoryItemID("player", slot)
         if id then equipped[slot] = id end
     end
 

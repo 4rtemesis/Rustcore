@@ -25,21 +25,15 @@ local DURABLE_SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18 }
 -- ── Compat bag helpers ────────────────────────────────────────────────────────
 
 local function BagGetNumSlots(bag)
-    if C_Container then return C_Container.GetContainerNumSlots(bag) end
-    return GetContainerNumSlots(bag)
+    return RustcoreCompat.GetContainerNumSlots(bag)
 end
 
 local function BagGetItemLink(bag, slot)
-    if C_Container then return C_Container.GetContainerItemLink(bag, slot) end
-    return GetContainerItemLink(bag, slot)
+    return RustcoreCompat.GetContainerItemLink(bag, slot)
 end
 
 local function BagPickupItem(bag, slot)
-    if C_Container then
-        C_Container.PickupContainerItem(bag, slot)
-    else
-        PickupContainerItem(bag, slot)
-    end
+    RustcoreCompat.PickupContainerItem(bag, slot)
 end
 
 -- ── Item ID helpers ───────────────────────────────────────────────────────────
@@ -72,7 +66,7 @@ local function FindAndPickupItem(link)
     if not targetID then return false end
 
     for _, slot in ipairs(DURABLE_SLOTS) do
-        local eLink = GetInventoryItemLink("player", slot)
+        local eLink = RustcoreCompat.GetInventoryItemLink("player", slot)
         if eLink and GetItemID(eLink) == targetID then
             ClearCursor()
             PickupInventoryItem(slot)
@@ -80,7 +74,7 @@ local function FindAndPickupItem(link)
         end
     end
 
-    for bag = 0, 4 do
+    for bag = 0, RustcoreCompat.MaxBagIndex() do
         for slot = 1, BagGetNumSlots(bag) do
             local bLink = BagGetItemLink(bag, slot)
             if bLink and GetItemID(bLink) == targetID then
@@ -394,15 +388,15 @@ end
 
 local function ScanAndQueue()
     for _, slot in ipairs(DURABLE_SLOTS) do
-        local link   = GetInventoryItemLink("player", slot)
+        local link   = RustcoreCompat.GetInventoryItemLink("player", slot)
         local itemID = link and GetItemID(link)
         if itemID then
-            local current, max = GetInventoryItemDurability(slot)
+            local current, max = RustcoreCompat.GetInventoryItemDurability(slot)
             if current ~= nil and max and max > 0 and current == 0 then
                 if not IsDismissed(itemID) and not IsAlreadyPending(itemID) then
                     pendingRustedItems[#pendingRustedItems + 1] = {
                         link = link,
-                        tex  = GetInventoryItemTexture("player", slot),
+                        tex  = RustcoreCompat.GetInventoryItemTexture("player", slot),
                     }
                 end
             end

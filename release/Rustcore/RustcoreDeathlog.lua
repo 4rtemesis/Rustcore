@@ -402,7 +402,7 @@ local function PopulateRow(row, entry, layout, rowIndex)
         row.icon:ClearAllPoints()
         row.icon:SetSize(iconSize, iconSize)
         row.icon:SetPoint("LEFT", row, "LEFT", layout.lost.x, 0)
-        row.icon:SetTexture(GetItemIcon(entry.link))
+        row.icon:SetTexture(RustcoreCompat.GetItemIcon(entry.link))
         row.icon:Show()
         row.itemHitbox:Show()
         row.itemHitbox.link = entry.link

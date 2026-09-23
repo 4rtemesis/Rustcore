@@ -86,12 +86,9 @@ local function Now()
 end
 
 function V.GetAddonVersion()
-    local version
-    if C_AddOns and C_AddOns.GetAddOnMetadata then
-        version = C_AddOns.GetAddOnMetadata("Rustcore", "Version")
-    elseif GetAddOnMetadata then
-        version = GetAddOnMetadata("Rustcore", "Version")
-    end
+    -- C_AddOns vs the flat global is a client difference like any other, so
+    -- it lives in the compat layer rather than being re-derived here.
+    local version = RustcoreCompat.GetAddOnMetadata("Rustcore", "Version")
     return version or "unknown"
 end
 

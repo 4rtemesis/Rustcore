@@ -68,17 +68,11 @@ local function Append(eventType, payload)
 end
 
 local function BagSlots(bag)
-    if C_Container and C_Container.GetContainerNumSlots then
-        return C_Container.GetContainerNumSlots(bag)
-    end
-    return GetContainerNumSlots and GetContainerNumSlots(bag) or 0
+    return RustcoreCompat.GetContainerNumSlots(bag)
 end
 
 local function BagLink(bag, slot)
-    if C_Container and C_Container.GetContainerItemLink then
-        return C_Container.GetContainerItemLink(bag, slot)
-    end
-    return GetContainerItemLink and GetContainerItemLink(bag, slot) or nil
+    return RustcoreCompat.GetContainerItemLink(bag, slot)
 end
 
 -- Stored as a string, the way the rest of the addon reads it, so every file
@@ -113,13 +107,13 @@ local function CountCopies(itemID)
     local count = 0
 
     for _, slot in ipairs(EQUIP_SLOTS) do
-        local link = GetInventoryItemLink and GetInventoryItemLink("player", slot)
+        local link = RustcoreCompat.GetInventoryItemLink and RustcoreCompat.GetInventoryItemLink("player", slot)
         if link and ItemID(link) == itemID then
             count = count + 1
         end
     end
 
-    for bag = 0, 4 do
+    for bag = 0, RustcoreCompat.MaxBagIndex() do
         for slot = 1, (BagSlots(bag) or 0) do
             local link = BagLink(bag, slot)
             if link and ItemID(link) == itemID then

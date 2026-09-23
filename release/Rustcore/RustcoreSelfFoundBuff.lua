@@ -11,7 +11,10 @@
 -- the whole native BuffFrame is made invisible and mouse-transparent (alpha
 -- 0, EnableMouse off - not :Hide(), so Blizzard's own bookkeeping is left
 -- alone), and we draw our own row of icons from scratch by reading aura
--- data directly via UnitAura("player", i, "HELPFUL"). Debuffs are already
+-- data through RustcoreCompat.GetAura, which hands back the classic tuple on
+-- every client, including the modern one where UnitAura no longer exists.
+-- The suppression above is likewise delegated: alpha rather than :Hide() is
+-- what keeps it from fighting Edit Mode. Debuffs are already
 -- shown natively elsewhere on screen and are intentionally not duplicated
 -- here. Our self-found icon is always slot 1; every real buff follows in
 -- slot 2, 3, ... in the same top-right-anchored, left-growing, row-wrapping
@@ -144,19 +147,39 @@ local function CreateAuraButton()
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        -- The aura path goes through the compat layer because SetUnitAura
+        -- was removed on the modern client; the backend falls back to
+        -- SetUnitBuff/SetUnitDebuff there and reports whether it managed
+        -- to fill the tooltip. A blank tooltip is worse than none, so an
+        -- unfilled one stays hidden.
+        local filled = false
         if self.weaponSlot then
             GameTooltip:SetInventoryItem("player", self.weaponSlot)
-        elseif self.auraIndex and GameTooltip.SetUnitAura then
-            GameTooltip:SetUnitAura("player", self.auraIndex, self.auraFilter)
+            filled = true
+        elseif self.auraIndex then
+            filled = RustcoreCompat.SetTooltipAura(
+                GameTooltip, "player", self.auraIndex, self.auraFilter)
         end
-        GameTooltip:Show()
+        if filled then GameTooltip:Show() else GameTooltip:Hide() end
     end)
     b:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
     b:SetScript("OnClick", function(self)
         if self.auraIndex then
-            pcall(CancelUnitBuff, "player", self.auraIndex, self.auraFilter)
+            -- CancelUnitBuff is protected: from an addon button under
+            -- lockdown the call is refused outright, and the bare pcall
+            -- that used to wrap it swallowed that silently, so the buff
+            -- simply did not go away and nothing said why.
+            if InCombatLockdown and InCombatLockdown() then
+                if UIErrorsFrame then
+                    UIErrorsFrame:AddMessage(
+                        "Can't cancel a buff while in combat",
+                        1, 0.3, 0.3, 1, 3)
+                end
+            else
+                pcall(CancelUnitBuff, "player", self.auraIndex, self.auraFilter)
+            end
         end
     end)
 
@@ -202,41 +225,19 @@ local function PositionSlot(button, slotIndex, perRow, baseX, baseY)
         baseX - (col * (BUTTON_SIZE + GAP)), baseY - (row * (BUTTON_SIZE + GAP)))
 end
 
+-- The mechanics of suppressing Blizzard's buff frame moved into the compat
+-- backends, because this is one of the sharpest differences between the
+-- two client lineages: Era/TBC have a plain BuffFrame plus three
+-- standalone TempEnchant globals, while the modern client nests the aura
+-- container, hides the enchant buttons behind non-global paths, and adds
+-- Edit Mode and combat lockdown on top. This file now only decides *when*
+-- to suppress; each backend decides *how*.
 function HideNativeBuffFrame()
-    local frame = _G.BuffFrame
-    if frame then
-        frame:SetAlpha(0)
-        frame:EnableMouse(false)
-    end
-
-    -- Weapon-enchant (poison/oil/stone) buffs aren't part of BuffFrame at
-    -- all in Classic/TBC FrameXML - there's no wrapping "TemporaryEnchantFrame"
-    -- container, just three standalone global buttons. Hiding BuffFrame alone
-    -- left these visible, showing Blizzard's own purple-bordered icon
-    -- underneath/beside ours.
-    for i = 1, 3 do
-        local enchantButton = _G["TempEnchant" .. i]
-        if enchantButton then
-            enchantButton:SetAlpha(0)
-            enchantButton:EnableMouse(false)
-        end
-    end
+    RustcoreCompat.HideNativeBuffFrame()
 end
 
 local function ShowNativeBuffFrame()
-    local frame = _G.BuffFrame
-    if frame then
-        frame:SetAlpha(1)
-        frame:EnableMouse(true)
-    end
-
-    for i = 1, 3 do
-        local enchantButton = _G["TempEnchant" .. i]
-        if enchantButton then
-            enchantButton:SetAlpha(1)
-            enchantButton:EnableMouse(true)
-        end
-    end
+    RustcoreCompat.ShowNativeBuffFrame()
 end
 
 function RefreshAuraLayout()
@@ -254,7 +255,8 @@ function RefreshAuraLayout()
 
     local auraIndex = 1
     while true do
-        local name, icon, count, _, duration, expirationTime = UnitAura("player", auraIndex, "HELPFUL")
+        local name, icon, count, _, duration, expirationTime =
+            RustcoreCompat.GetAura("player", auraIndex, "HELPFUL")
         if not name then break end
 
         usedCount = usedCount + 1
@@ -290,7 +292,8 @@ function RefreshAuraLayout()
         b.auraFilter = nil
         b.weaponSlot = invSlot
         b.border:Show()
-        b.icon:SetTexture(GetInventoryItemTexture("player", invSlot))
+        b.icon:SetTexture(RustcoreCompat.GetInventoryItemTexture("player", invSlot)
+            or RustcoreCompat.FALLBACK_ICON)
         b.count:SetText((charges and charges > 0) and tostring(charges) or "")
         if expirationMs and expirationMs > 0 then
             b.expirationTime = now + (expirationMs / 1000)
@@ -305,7 +308,7 @@ function RefreshAuraLayout()
     end
 
     local hasMainHandEnchant, mainHandExpiration, mainHandCharges, _mainHandEnchantID,
-          hasOffHandEnchant, offHandExpiration, offHandCharges = GetWeaponEnchantInfo()
+          hasOffHandEnchant, offHandExpiration, offHandCharges = RustcoreCompat.GetWeaponEnchantInfo()
     AddWeaponEnchantSlot(hasMainHandEnchant, mainHandExpiration, mainHandCharges, INVSLOT_MAINHAND)
     AddWeaponEnchantSlot(hasOffHandEnchant, offHandExpiration, offHandCharges, INVSLOT_OFFHAND)
 
@@ -458,10 +461,12 @@ local function CreateTargetAuraButton()
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
-        if self.auraIndex and GameTooltip.SetUnitAura then
-            GameTooltip:SetUnitAura("target", self.auraIndex, self.auraFilter)
+        local filled = false
+        if self.auraIndex then
+            filled = RustcoreCompat.SetTooltipAura(
+                GameTooltip, "target", self.auraIndex, self.auraFilter)
         end
-        GameTooltip:Show()
+        if filled then GameTooltip:Show() else GameTooltip:Hide() end
     end)
     b:SetScript("OnLeave", function()
         GameTooltip:Hide()
@@ -514,7 +519,6 @@ local function SetNativeTargetAurasHidden(hidden)
             local b = _G[prefix .. i]
             if not b then break end
             b:SetAlpha(hidden and 0 or 1)
-            b:EnableMouse(not hidden)
             i = i + 1
         end
     end
@@ -574,7 +578,7 @@ function RefreshTargetIcon()
         local auraIndex = 1
         while true do
             local name, auraIcon, count, debuffType, duration, expirationTime =
-                UnitAura("target", auraIndex, filter)
+                RustcoreCompat.GetAura("target", auraIndex, filter)
             if not name then break end
 
             usedCount = usedCount + 1

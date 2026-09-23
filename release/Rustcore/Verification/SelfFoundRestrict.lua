@@ -84,28 +84,16 @@ end
 -- Inventory sampling ---------------------------------------------------------
 
 -- Item id -> total count across the carried bags. Mirrors CaptureBagSnapshot in
--- Rustcore.lua and BagItemCounts in SelfFound.lua: C_Container is the current
--- API and the bare globals are the pre-10.0 spelling still present on the
--- Classic clients, so both are tried rather than assumed.
+-- Rustcore.lua and BagItemCounts in SelfFound.lua. Bag access goes through
+-- RustcoreCompat, so this file no longer has to know whether the client
+-- exposes C_Container or the older flat globals.
 local function BagCounts()
     local counts = {}
-    local maxBag = NUM_BAG_SLOTS or 4
+    local maxBag = RustcoreCompat.MaxBagIndex()
     for bag = 0, maxBag do
-        local slots = 0
-        if C_Container and C_Container.GetContainerNumSlots then
-            slots = C_Container.GetContainerNumSlots(bag) or 0
-        elseif GetContainerNumSlots then
-            slots = GetContainerNumSlots(bag) or 0
-        end
+        local slots = RustcoreCompat.GetContainerNumSlots(bag)
         for slot = 1, slots do
-            local link, count
-            if C_Container and C_Container.GetContainerItemInfo then
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info then link, count = info.hyperlink, info.stackCount or 1 end
-            elseif GetContainerItemInfo then
-                local _, stack, _, _, _, _, hyperlink = GetContainerItemInfo(bag, slot)
-                link, count = hyperlink, stack or 1
-            end
+            local link, count = RustcoreCompat.GetContainerItemLinkAndCount(bag, slot)
             local id = link and link:match("item:(%d+)")
             if id then counts[id] = (counts[id] or 0) + (count or 1) end
         end

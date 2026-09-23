@@ -156,9 +156,9 @@ local function SnapshotBaseline(record)
     }
 
     for _, slot in ipairs(DURABLE_SLOTS) do
-        local link = GetInventoryItemLink and GetInventoryItemLink("player", slot)
+        local link = RustcoreCompat.GetInventoryItemLink and RustcoreCompat.GetInventoryItemLink("player", slot)
         if link then
-            local current, maximum = GetInventoryItemDurability(slot)
+            local current, maximum = RustcoreCompat.GetInventoryItemDurability(slot)
             if current and maximum and maximum > 0 then
                 baseline.durability[slot] = { cur = current, max = maximum }
             end

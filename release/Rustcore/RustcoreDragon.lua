@@ -27,8 +27,15 @@ local DRAGON_TEXTURES = {
     [5] = "Dragon-Dust-Target.png",
 }
 
-local NATIVE_TEXTURE_PLAYER = "PlayerFrameTexture"
-local NATIVE_TEXTURE_TARGET = "TargetFrameTextureFrameTexture"
+-- Which portrait art to replace. The real texture paths live in the compat
+-- backends now, because they differ completely between client lineages -
+-- flat globals on Era/TBC, nested members with no global alias on the
+-- modern client. These two are just the keys the backend is asked for.
+-- A nil answer means this client's frame layout isn't known to us, and
+-- EnsurePlayerDragon / EnsureTargetDragon then decline to draw rather
+-- than erroring on every target change.
+local NATIVE_TEXTURE_PLAYER = "player"
+local NATIVE_TEXTURE_TARGET = "target"
 
 -- PlayerFrameTexture and TargetFrameTextureFrameTexture do not have the
 -- same rendered dimensions, even though both replacement images use the
@@ -165,7 +172,7 @@ end
 local function EnsurePlayerDragon()
     if playerDragon then return playerDragon end
     local parent = _G.PlayerFrame
-    local nativeTexture = _G[NATIVE_TEXTURE_PLAYER]
+    local nativeTexture = RustcoreCompat.PortraitTexture(NATIVE_TEXTURE_PLAYER)
     if not parent or not nativeTexture then return nil end
 
     local holder = CreateFrame("Frame", "RustcoreDragonPlayerFrameHolder", parent)
@@ -200,7 +207,7 @@ end
 local function EnsureTargetDragon()
     if targetDragon then return targetDragon end
     local parent = _G.TargetFrame
-    local nativeTexture = _G[NATIVE_TEXTURE_TARGET]
+    local nativeTexture = RustcoreCompat.PortraitTexture(NATIVE_TEXTURE_TARGET)
     if not parent or not nativeTexture then return nil end
 
     local holder = CreateFrame("Frame", "RustcoreDragonTargetFrameHolder", parent)
@@ -221,8 +228,8 @@ local function EnsureTargetDragon()
     return targetDragon
 end
 
-local function SetNativeTextureHidden(globalName, hidden)
-    local t = _G[globalName]
+local function SetNativeTextureHidden(which, hidden)
+    local t = RustcoreCompat.PortraitTexture(which)
     if not t then return end
     if hidden then
         if t.rustcoreOrigAlpha == nil then t.rustcoreOrigAlpha = t:GetAlpha() end

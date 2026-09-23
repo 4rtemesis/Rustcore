@@ -106,7 +106,7 @@ end
 local function GetEquippedIconList()
     local icons = {}
     for _, slotId in ipairs(ALL_SLOTS) do
-        local tex = GetInventoryItemTexture("player", slotId)
+        local tex = RustcoreCompat.GetInventoryItemTexture("player", slotId)
         if tex then
             icons[#icons+1] = { tex = tex, slot = slotId }
         end
@@ -126,7 +126,7 @@ end
 
 local function GetDisplayTexture(item)
     if not item then return "Interface\\Icons\\INV_Misc_QuestionMark" end
-    return item.tex or (item.link and GetItemIcon(item.link)) or GetInventoryItemTexture("player", item.slot) or "Interface\\Icons\\INV_Misc_QuestionMark"
+    return item.tex or (item.link and RustcoreCompat.GetItemIcon(item.link)) or RustcoreCompat.GetInventoryItemTexture("player", item.slot) or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 local function BuildIconListFromItems(items)
@@ -904,24 +904,19 @@ end
 -- ── Container API wrappers ────────────────────────────────────────────────────
 
 local function BagGetNumSlots(bag)
-    if C_Container then return C_Container.GetContainerNumSlots(bag) end
-    return GetContainerNumSlots(bag)
+    return RustcoreCompat.GetContainerNumSlots(bag)
 end
 
 local function BagGetItemLink(bag, slot)
-    if C_Container then return C_Container.GetContainerItemLink(bag, slot) end
-    return GetContainerItemLink(bag, slot)
+    return RustcoreCompat.GetContainerItemLink(bag, slot)
 end
 
 local function BagPickupItem(bag, slot)
-    if C_Container then
-        return C_Container.PickupContainerItem(bag, slot)
-    end
-    return PickupContainerItem(bag, slot)
+    return RustcoreCompat.PickupContainerItem(bag, slot)
 end
 
 local function FindEmptyBagSlot()
-    for bag = 0, 4 do
+    for bag = 0, RustcoreCompat.MaxBagIndex() do
         for slot = 1, BagGetNumSlots(bag) do
             if not BagGetItemLink(bag, slot) then return bag, slot end
         end
@@ -983,7 +978,7 @@ end
 local function FindItemInBagsByLink(link)
     if not link then return nil, nil end
 
-    for bag = 0, 4 do
+    for bag = 0, RustcoreCompat.MaxBagIndex() do
         for slot = 1, BagGetNumSlots(bag) do
             local bagLink = BagGetItemLink(bag, slot)
             if bagLink and LinksMatch(bagLink, link) then
@@ -1072,7 +1067,7 @@ RemoveFirstPendingItem = function(countDestroyed)
 end
 
 GetTrackedItemState = function(item)
-    local equippedLink = GetInventoryItemLink("player", item.slot)
+    local equippedLink = RustcoreCompat.GetInventoryItemLink("player", item.slot)
     if equippedLink and not LinksMatch(equippedLink, item.link) then
         equippedLink = nil
     end

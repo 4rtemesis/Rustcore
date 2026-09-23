@@ -143,7 +143,7 @@ local function FindHighestIlvlItem(items)
     local best, bestIlvl = nil, 0
     for _, item in ipairs(items) do
         if item.link then
-            local ilvl = select(4, GetItemInfo(item.link)) or 0
+            local ilvl = select(4, RustcoreCompat.GetItemInfo(item.link)) or 0
             if ilvl > bestIlvl then
                 bestIlvl = ilvl
                 best = item

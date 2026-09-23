@@ -235,7 +235,7 @@ local function SetCounterDigits(digits, value, color)
 end
 
 -- An item's quality colour, read out of the link's own colour escape rather
--- than from GetItemInfo. The link carries it whether or not the client has the
+-- than from RustcoreCompat.GetItemInfo. The link carries it whether or not the client has the
 -- item cached, which matters here: the best item lost is usually something the
 -- character last saw a long time ago, so the cache is routinely cold on login.
 local function ItemRarityColor(link)
@@ -248,9 +248,9 @@ local function ItemRarityColor(link)
                 tonumber(hex:sub(7, 8), 16) / 255,
             }
         end
-        local quality = select(3, GetItemInfo(link))
-        if quality and GetItemQualityColor then
-            local r, g, b = GetItemQualityColor(quality)
+        local quality = select(3, RustcoreCompat.GetItemInfo(link))
+        if quality and RustcoreCompat.GetItemQualityColor then
+            local r, g, b = RustcoreCompat.GetItemQualityColor(quality)
             return { r, g, b }
         end
     end
@@ -261,7 +261,7 @@ end
 -- has nothing to give.
 local function ItemDisplayName(link)
     if not link then return nil end
-    return (GetItemInfo(link)) or link:match("|h%[(.-)%]|h")
+    return (RustcoreCompat.GetItemInfo(link)) or link:match("|h%[(.-)%]|h")
 end
 
 -- Put a name in a row's name box. The font size is fixed per variant at build
@@ -430,7 +430,7 @@ end
 
 local function GetItemIlvl(item)
     if not item or not item.link then return 0 end
-    return item.ilvl or select(4, GetItemInfo(item.link)) or 0
+    return item.ilvl or select(4, RustcoreCompat.GetItemInfo(item.link)) or 0
 end
 
 local function UpdateBestItem(item)
@@ -457,7 +457,7 @@ local function FillRow(counter, row, stats)
     if counter.isBestItem then
         local link = stats.bestItemLostLink
         if row.icon then
-            row.icon:SetTexture((link and GetItemIcon(link)) or counter.icon)
+            row.icon:SetTexture((link and RustcoreCompat.GetItemIcon(link)) or counter.icon)
         end
         row.itemLink = link
         if row.rusted then row.rusted:SetShown(link and true or false) end
@@ -1371,18 +1371,18 @@ GetSlotStateKey = function(slot, link)
 end
 
 local function ScanDurability(seedOnly)
-    if scanning or not GetInventoryItemDurability then return end
+    if scanning or not RustcoreCompat.GetInventoryItemDurability then return end
     scanning = true
     local stats = EnsureStatsDB()
     for _, slot in ipairs(GEAR_SLOTS) do
-        local link = GetInventoryItemLink("player", slot)
-        local current, maximum = GetInventoryItemDurability(slot)
+        local link = RustcoreCompat.GetInventoryItemLink("player", slot)
+        local current, maximum = RustcoreCompat.GetInventoryItemDurability(slot)
         local slotKey, itemKey = GetSlotStateKey(slot, link)
         if link and current and maximum and maximum > 0 then
             if current <= 0 then
                 if stats.zeroDurabilitySlots[slotKey] ~= itemKey then
                     if not seedOnly then
-                        local name, _, _, ilvl = GetItemInfo(link)
+                        local name, _, _, ilvl = RustcoreCompat.GetItemInfo(link)
                         RustcoreStats.RegisterRustedItem({
                             slot = slot,
                             link = link,

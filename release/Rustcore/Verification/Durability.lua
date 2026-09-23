@@ -72,17 +72,17 @@ end
 -- One slot's identity and wear, or nil when the slot is empty, and a second
 -- return saying whether the slot is genuinely empty as opposed to unreadable.
 local function ReadSlot(slot)
-    local link = GetInventoryItemLink and GetInventoryItemLink("player", slot)
+    local link = RustcoreCompat.GetInventoryItemLink and RustcoreCompat.GetInventoryItemLink("player", slot)
     if not link then return nil, true end
 
-    local current, maximum = GetInventoryItemDurability(slot)
+    local current, maximum = RustcoreCompat.GetInventoryItemDurability(slot)
     if not current or not maximum or maximum <= 0 then
         -- Equipped but no durability figures yet (or an item without any).
         return nil, false
     end
 
     return {
-        id   = GetInventoryItemID and GetInventoryItemID("player", slot) or nil,
+        id   = RustcoreCompat.GetInventoryItemID and RustcoreCompat.GetInventoryItemID("player", slot) or nil,
         guid = ItemGuidForSlot(slot),
         cur  = current,
         max  = maximum,

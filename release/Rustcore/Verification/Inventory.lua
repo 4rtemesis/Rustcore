@@ -13,7 +13,7 @@
 -- conditions scattered about, and for it to use intrinsic game information
 -- rather than market prices -- which Rustcore cannot see and which would be
 -- unreliable even if it could. Everything the score consults comes from
--- GetItemInfo.
+-- RustcoreCompat.GetItemInfo.
 
 RustcoreVerification = RustcoreVerification or {}
 local V = RustcoreVerification
@@ -28,27 +28,15 @@ local EQUIPMENT_SLOTS = 19
 
 -- Counting ---------------------------------------------------------------------
 
--- Mirrors the readers in SelfFound.lua and SelfFoundRestrict.lua: C_Container is
--- the current API, the bare globals are the older spelling still present on the
--- Classic clients, and both are tried rather than assumed.
+-- Mirrors the readers in SelfFound.lua and SelfFoundRestrict.lua. Bag access
+-- goes through RustcoreCompat, so this file no longer has to know whether the
+-- client exposes C_Container or the older flat globals.
 local function BagCounts(counts)
-    local maxBag = NUM_BAG_SLOTS or 4
+    local maxBag = RustcoreCompat.MaxBagIndex()
     for bag = 0, maxBag do
-        local slots = 0
-        if C_Container and C_Container.GetContainerNumSlots then
-            slots = C_Container.GetContainerNumSlots(bag) or 0
-        elseif GetContainerNumSlots then
-            slots = GetContainerNumSlots(bag) or 0
-        end
+        local slots = RustcoreCompat.GetContainerNumSlots(bag)
         for slot = 1, slots do
-            local link, count
-            if C_Container and C_Container.GetContainerItemInfo then
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info then link, count = info.hyperlink, info.stackCount or 1 end
-            elseif GetContainerItemInfo then
-                local _, stack, _, _, _, _, hyperlink = GetContainerItemInfo(bag, slot)
-                link, count = hyperlink, stack or 1
-            end
+            local link, count = RustcoreCompat.GetContainerItemLinkAndCount(bag, slot)
             local id = link and link:match("item:(%d+)")
             if id then counts[id] = (counts[id] or 0) + (count or 1) end
         end
@@ -57,7 +45,7 @@ end
 
 local function EquippedCounts(counts)
     for slot = 1, EQUIPMENT_SLOTS do
-        local id = GetInventoryItemID and GetInventoryItemID("player", slot)
+        local id = RustcoreCompat.GetInventoryItemID and RustcoreCompat.GetInventoryItemID("player", slot)
         if id then
             local key = tostring(id)
             counts[key] = (counts[key] or 0) + 1
@@ -92,11 +80,11 @@ Inv.SCORE_FAIL = 70
 -- belongs to this character at this point in the game.
 function Inv.Score(itemID, quantity)
     -- Snapshots key by the digits an item link yields, so the id arrives here as
-    -- a string. GetItemInfo treats a bare string as an item *name*, which would
+    -- a string. RustcoreCompat.GetItemInfo treats a bare string as an item *name*, which would
     -- silently never match, so it is converted back to a number first.
     local query = tonumber(itemID) or itemID
     local name, _, quality, itemLevel, minLevel, _, _, _, _, _, sellPrice =
-        GetItemInfo(query)
+        RustcoreCompat.GetItemInfo(query)
     if not name then return nil end
 
     quantity = quantity or 1
@@ -150,7 +138,7 @@ end
 -- State -------------------------------------------------------------------------
 
 local snapshot
-local pending = {}   -- itemID -> quantity, awaiting GetItemInfo
+local pending = {}   -- itemID -> quantity, awaiting RustcoreCompat.GetItemInfo
 
 -- Set once the world is loaded. Bag contents are not reliably readable before
 -- then, and diffing a real inventory against an empty early snapshot would read
@@ -246,7 +234,7 @@ local function Report(itemID, quantity)
 
     local score, detail = Inv.Score(itemID, quantity)
     if not score then
-        -- Not cached. GetItemInfo has queried the server; the answer arrives on
+        -- Not cached. RustcoreCompat.GetItemInfo has queried the server; the answer arrives on
         -- GET_ITEM_INFO_RECEIVED and the item is scored then.
         pending[itemID] = (pending[itemID] or 0) + quantity
         return
