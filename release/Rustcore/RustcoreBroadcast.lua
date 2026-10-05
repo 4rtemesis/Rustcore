@@ -118,12 +118,25 @@ local function SanitizeField(value, maxBytes)
     return text
 end
 
--- Only a real WoW item hyperlink is accepted; anything else (including a
--- crafted string designed to look like one but escape its structure) is
--- dropped rather than displayed or shown in the deathlog.
-local function IsValidItemLink(link)
-    if type(link) ~= "string" or link == "" then return true end
-    return link:match("^|c%x%x%x%x%x%x%x%x|Hitem:%d+:[%d:%-]*|h%[.-%]|h|r$") ~= nil
+-- Normalize named item-quality colors before sending AND receiving. The
+-- wire format stays compatible with peers that only understand hex colors.
+local function NormalizeItemLink(link)
+    if type(link) ~= "string" or link == "" then return "" end
+    local quality = link:match("^|cnIQ(%d+):")
+    if quality then
+        local colors = {
+            [0] = "ff9d9d9d", "ffffffff", "ff1eff00", "ff0070dd",
+            "ffa335ee", "ffff8000", "ffe6cc80", "ff00ccff", "ff00ccff",
+        }
+        local hex = colors[tonumber(quality)]
+        if not hex then return "" end
+        link = link:gsub("^|cnIQ%d+:", "|c" .. hex, 1)
+    end
+    -- Keep the item payload intact and reject embedded markup in its label.
+    if not link:match("^|c%x%x%x%x%x%x%x%x|Hitem:%d+:[%d:%-]*|h%[[^|%[%]~]*%]|h|r$") then
+        return ""
+    end
+    return link
 end
 
 local function EnsureRealmChannel()
@@ -142,9 +155,14 @@ end
 local function FindHighestIlvlItem(items)
     local best, bestIlvl = nil, 0
     for _, item in ipairs(items) do
-        if item.link then
-            local ilvl = select(4, RustcoreCompat.GetItemInfo(item.link)) or 0
-            if ilvl > bestIlvl then
+        if item.link and item.link ~= "" then
+            -- The death snapshot already knows the equipped item's level.
+            -- A fresh lookup can be uncached; zero-level gear is valid too.
+            local ilvl = tonumber(item.ilvl) or 0
+            if ilvl <= 0 then
+                ilvl = select(4, RustcoreCompat.GetItemInfo(item.link)) or 0
+            end
+            if not best or ilvl > bestIlvl then
                 bestIlvl = ilvl
                 best = item
             end
@@ -190,7 +208,7 @@ local function SerializeDeathData(d)
         SanitizeField(d.level),
         SanitizeField(d.zone),
         SanitizeField(d.source),
-        d.link or "",
+        NormalizeItemLink(d.link),
         SanitizeField(d.ilvl),
         SanitizeField(d.count),
         SanitizeField(d.race),
@@ -199,13 +217,48 @@ local function SerializeDeathData(d)
     }
     local msg = table.concat(fields, DELIM)
 
-    -- Both addon and custom-channel messages are limited to 255 bytes. Keep
-    -- the death itself if a long item hyperlink would push the payload over.
-    if #msg > (MAX_CHANNEL_MESSAGE_BYTES - #CHANNEL_MARKER) then
-        fields[4] = SanitizeField(d.zone, 40)
-        fields[5] = SanitizeField(d.source, 60)
-        fields[6] = ""
+    -- Keep an item identity when a retail hyperlink exceeds the wire budget.
+    -- Shorten descriptive fields first. If the full link still cannot fit,
+    -- send a base-item link before shortening its label. Keep the separately
+    -- reported ilvl and loss count, and the existing wire format for old peers.
+    local limit = MAX_CHANNEL_MESSAGE_BYTES - #CHANNEL_MARKER
+    if #msg > limit then
+        local limits = {40, 16, 3, 24, 24, 0, 6, 3, 20, 7, 12}
+        for i, cap in ipairs(limits) do
+            if i ~= 6 then fields[i] = SanitizeField(fields[i], cap) end
+        end
         msg = table.concat(fields, DELIM)
+        if #msg > limit then
+            local color, payload, label = fields[6]:match("^(|c%x%x%x%x%x%x%x%x)|H(item:%d+:[%d:%-]*)|h%[([^|%[%]~]*)%]|h|r$")
+            if payload then
+                fields[6] = ""
+                local available = limit - #table.concat(fields, DELIM)
+                local function compact(item)
+                    local shell = color .. "|H" .. item .. "|h[]|h|r"
+                    local maxName = math.max(0, available - #shell)
+                    local name = label:sub(1, maxName)
+                    -- Do not split the final UTF-8 character when byte-budgeting.
+                    if #label > maxName then
+                        while #name > 0 and (label:byte(#name + 1) or 0) >= 128
+                            and (label:byte(#name + 1) or 0) < 192 do
+                            name = name:sub(1, -2)
+                        end
+                    end
+                    return color .. "|H" .. item .. "|h[" .. name .. "]|h|r"
+                end
+                -- Do not spend the remaining bytes on bonus/enchant fields
+                -- at the expense of the item name. A base link retains the
+                -- identity and rarity; d.ilvl retains the lost variant's level.
+                local full = color .. "|H" .. payload .. "|h[" .. label .. "]|h|r"
+                if #full > available then
+                    payload = "item:" .. payload:match("^item:(%d+)") .. ":"
+                end
+                fields[6] = compact(payload)
+            else
+                fields[6] = ""
+            end
+            msg = table.concat(fields, DELIM)
+        end
     end
     return msg
 end
@@ -327,8 +380,7 @@ local function Parse(msgStr)
     local parts = { strsplit(DELIM, msgStr) }
     if #parts < 8 then return nil end
 
-    local link = parts[6]
-    if not IsValidItemLink(link) then link = "" end
+    local link = NormalizeItemLink(parts[6])
 
     return {
         name   = SanitizeField(parts[1], 40),

@@ -25,6 +25,7 @@ local queried = {}      -- normalized name -> last query time
 local verified = {}     -- normalized name -> last verified-response time
 local seen = {}          -- normalized name -> last any-response time (addon presence, regardless of verified)
 local difficultyOf = {} -- normalized name -> last reported difficulty tier
+local rustboundOf = {} -- normalized name -> latest reported Rustbound status
 local overlays = {}     -- frame -> overlay texture
 local prefixRegistered = false
 
@@ -121,6 +122,11 @@ function RustcoreSelfFoundComm.IsKnownSelfFound(name)
     return name and IsVerifiedFresh(name) or false
 end
 
+function RustcoreSelfFoundComm.IsKnownRustbound(name)
+    name = NormalizeName(name)
+    return name and IsSeenFresh(name) and rustboundOf[name] == true or false
+end
+
 -- ── Sending ───────────────────────────────────────────────────────────────────
 
 local function RequestStatus(fullName)
@@ -151,15 +157,19 @@ local function HandleQuery(name, sender)
     -- No fallback to the selected preset: if verification cannot answer, this
     -- character has nothing verified to announce, and 0 is outside the 1-5 range
     -- receivers accept, so they show no dragon.
-    SendMessage(table.concat({ "R", myName, isVerified and "1" or "0", tostring(difficulty) }, DELIM), sender)
+    local R = RustcoreReforge
+    -- Developer prestige is local test state, never advertised to other players.
+    local rustbound = R and not R.IsDebug() and R.HasRustbound()
+    SendMessage(table.concat({ "R", myName, isVerified and "1" or "0", tostring(difficulty), rustbound and "1" or "0" }, DELIM), sender)
 end
 
-local function HandleResponse(name, verifiedFlag, difficulty, sender)
+local function HandleResponse(name, verifiedFlag, difficulty, sender, rustboundFlag)
     name = NormalizeName(name)
     local senderName = NormalizeName(sender)
     if not name or not senderName or name ~= senderName then return end
     name = senderName
     seen[name] = GetTime()
+    rustboundOf[name] = rustboundFlag == "1"
     local reportedDifficulty = tonumber(difficulty)
     if reportedDifficulty and reportedDifficulty >= 1 and reportedDifficulty <= 5 then
         difficultyOf[name] = math.floor(reportedDifficulty)
@@ -324,11 +334,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, _, sender = ...
         if prefix ~= PREFIX then return end
-        local kind, name, verifiedFlag, difficulty = strsplit(DELIM, msg)
+        local kind, name, verifiedFlag, difficulty, rustboundFlag = strsplit(DELIM, msg)
         if kind == "Q" then
             HandleQuery(name, sender)
         elseif kind == "R" then
-            HandleResponse(name, verifiedFlag, difficulty, sender)
+            HandleResponse(name, verifiedFlag, difficulty, sender, rustboundFlag)
         end
     end
 end)

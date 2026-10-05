@@ -130,6 +130,8 @@ end
 --   "unreadable"  our own read failed, so nothing can be concluded
 --   "unconfirmed" the client offers no item GUID, so a repair and a second
 --                 copy of the same item look alike (section 14 names this case)
+U.GetRepairAction = RepairArmed
+
 local function CompareIdentity(previous, current, slot)
     if replacedSlots[slot] then return "different" end
     if previous.guid and current.guid then
@@ -164,7 +166,11 @@ function U.Compare(previous, current)
         local was, now = previous[slot], current[slot]
         if was and now and now.cur > was.cur then
             local verdict = CompareIdentity(was, now, slot)
-            if verdict == "same" then
+            local authorized = verdict == "same" and RustcoreReforge
+                and RustcoreReforge.AcceptVerifiedRepair(was, now)
+            if authorized then
+                -- Exact per-item successful Boss Reforge; no blanket exemption.
+            elseif verdict == "same" then
                 findings.slots[#findings.slots + 1] = slot
                 findings.gained = findings.gained + (now.cur - was.cur)
             elseif verdict == "unconfirmed" then

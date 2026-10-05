@@ -378,7 +378,7 @@ function UI.BuildPage(page)
         -- One minute is advice, not the limit: UNACCOUNTED_ALLOWANCE is ninety
         -- seconds, and the margin is there so a player who follows this to the
         -- letter still lands inside it.
-        .. "Log out within 1 minute of pressing Export. Play on this PC after "
+        .. "|cffd9bf80Log out within 1 minute of pressing Export.|r Play on this PC after "
         .. "that is the one thing the transfer cannot account for, and the "
         .. "import will be refused.\n\n"
         .. "Time logged out costs nothing, so carrying the string across can "

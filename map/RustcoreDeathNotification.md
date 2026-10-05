@@ -1,4 +1,4 @@
-# RustcoreDeathNotification.lua — 355 lines
+# RustcoreDeathNotification.lua — 362 lines
 
 Top-level definitions in `dist/forever/Rustcore/RustcoreDeathNotification.lua`.
 
@@ -18,6 +18,6 @@ Top-level definitions in `dist/forever/Rustcore/RustcoreDeathNotification.lua`.
 245:local function Land(frame)
 262:local function OnDropUpdate(frame)
 272:local function BuildFrame()
-299:local function EnsureFrame()
-306:function RustcoreDeathNotification.Show(d)
+306:local function EnsureFrame()
+313:function RustcoreDeathNotification.Show(d)
 ```

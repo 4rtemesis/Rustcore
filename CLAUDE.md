@@ -39,6 +39,23 @@ width is what matters, not which tool you use.**
 - Generate artifacts with `> file` and print only `wc -l`, so generated content never
   enters context.
 
+## Hard rules against context exhaustion
+
+Breaking any of these has compacted the conversation mid-task more than once — most
+recently whole-file reads of `Verification/Time.lua` and `Verification/UI.lua`.
+
+- **Never call `Read` on a `.lua` file without `offset` and `limit` ≤ 20.** No exceptions,
+  including "small" files and everything under `Verification/`.
+- **Grep always with line numbers**: `output_mode: "content"` + `-n`, or `grep -n` in Bash.
+  `files_with_matches` returns no line numbers and forces a follow-up read.
+- The only loop is: grep → read ≤20-line window → edit. Never "look around" a file.
+- Never re-read a window you already read. Note the line numbers you found in the
+  task notes above so the next session skips the search too.
+- The Edit tool needs a prior `Read` of the file — satisfy it with a narrow
+  offset/limit read of exactly the lines being changed, never a full read.
+- If a fix spans many sites, grep for all of them first, then do narrow read+edit
+  pairs one at a time.
+
 ## Repo layout
 
 | Path | What it is |

@@ -671,6 +671,38 @@ local SLOT_TITLES = {
     [18] = RANGEDSLOT or "Ranged",
 }
 
+-- Comparison belongs to the next tooltip owner again as soon as this one hides.
+local function RestoreCounterTooltipComparison(tooltip)
+    local saved = tooltip.rustcoreCounterComparison
+    if not saved then return end
+    tooltip.supportsItemComparison = saved.supported
+    tooltip.suppressAutomaticCompareItem = saved.suppressed
+    tooltip.rustcoreCounterComparison = nil
+end
+
+function RustcoreDurability.ShowItemTooltip(frame)
+    RestoreCounterTooltipComparison(GameTooltip)
+    GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
+    GameTooltip.rustcoreCounterComparison = {
+        supported = GameTooltip.supportsItemComparison,
+        suppressed = GameTooltip.suppressAutomaticCompareItem,
+    }
+    -- Forever's item-tooltip renderer checks supportsItemComparison, including
+    -- when Shift is held. This item is already equipped, so comparison is redundant.
+    GameTooltip.supportsItemComparison = false
+    GameTooltip.suppressAutomaticCompareItem = true
+    if not GameTooltip.rustcoreCounterComparisonHooked then
+        GameTooltip:HookScript("OnHide", RestoreCounterTooltipComparison)
+        GameTooltip.rustcoreCounterComparisonHooked = true
+    end
+    if TooltipComparisonManager and TooltipComparisonManager.Clear then
+        TooltipComparisonManager:Clear(GameTooltip)
+    end
+    for _, tooltip in ipairs(GameTooltip.shoppingTooltips or {}) do tooltip:Hide() end
+    GameTooltip:SetInventoryItem("player", frame.slotId)
+    GameTooltip:Show()
+end
+
 local function BuildSlotFrame(parent, slotId)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(FRAME_W, FRAME_H)
@@ -738,11 +770,7 @@ local function BuildSlotFrame(parent, slotId)
     f:SetScript("OnDragStart", StartHUDDrag)
     f:SetScript("OnDragStop", StopHUDDrag)
     f:HookScript("OnHide", StopHUDDrag)
-    f:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetInventoryItem("player", self.slotId)
-        GameTooltip:Show()
-    end)
+    f:SetScript("OnEnter", RustcoreDurability.ShowItemTooltip)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Slot heading for the horizontal layout, in the band UpdateHUD reserves
@@ -1176,6 +1204,8 @@ local function UpdateHUD()
 
     for _, entry in ipairs(slotEntries) do
         local slot    = entry.slot
+        local reforgeReady = RustcoreReforge and RustcoreReforge.UpdateHUDIndicator
+            and RustcoreReforge.UpdateHUDIndicator(entry.frame, slot)
         local link    = RustcoreCompat.GetInventoryItemLink("player", slot)
         local visible = false
         local pct     = 1  -- default; overwritten when durability is read
@@ -1187,7 +1217,7 @@ local function UpdateHUD()
             if current ~= nil and maximum ~= nil and maximum > 0 then
                 pct = current / maximum
                 local threshold = GetLowThresholdPct(maximum)
-                if showAll or pct <= threshold then
+                if showAll or reforgeReady or pct <= threshold then
                     local itemTex = RustcoreCompat.GetInventoryItemTexture("player", slot)
                     local fallback = "Interface\\Icons\\INV_Misc_QuestionMark"
                     entry.frame.iconTex:SetTexture(itemTex or fallback)

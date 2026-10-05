@@ -84,7 +84,64 @@ local targetDragonShown = false
 local playerValueTexts = {}
 local targetValueTexts = {}
 
+-- ClassicUIForever keeps its artwork in the native container, with level,
+-- status and PvP regions on higher contextual/text frames. Put only our art
+-- in that container too; changing their parents/levels would fight its layout.
+local function IsClassicUIFrame(parent)
+    local host = parent and parent.fcui and parent.fcui.host
+    return host and host:IsShown()
+end
+
+-- ClassicUI's level ring is baked into its 232x100 frame art, not the
+-- modern LevelBackgroundCircle (which the skin fades out). Repeat only the
+-- 28px badge crop over the dragon, on the same container and one sublayer up.
+local function SyncClassicLevelBadge(tex, which, container)
+    local badge = tex.rustcoreClassicBadge
+    local art = container and container.FrameTexture
+    if not art then
+        if badge then badge:Hide() end
+        return
+    end
+    if not badge then
+        badge = container:CreateTexture(nil, "OVERLAY", nil, 1)
+        tex.rustcoreClassicBadge = badge
+    end
+    local x, y, radius = which == "player" and 55 or 178, 67, 14
+    local left, top, _, bottom, right = art:GetTexCoord()
+    badge:SetTexture(art:GetTexture())
+    badge:SetTexCoord(left + (right - left) * (x - radius) / 232,
+        left + (right - left) * (x + radius) / 232,
+        top + (bottom - top) * (y - radius) / 100,
+        top + (bottom - top) * (y + radius) / 100)
+    badge:SetSize(radius * 2, radius * 2)
+    badge:ClearAllPoints()
+    badge:SetPoint("CENTER", art, "TOPLEFT", x, -y)
+    badge:SetVertexColor(art:GetVertexColor())
+    badge:SetAlpha(art:GetAlpha())
+    badge:SetShown(tex:IsShown() and art:IsShown())
+end
+
+local function SyncDragonLayering(tex, which)
+    if not tex or (InCombatLockdown and InCombatLockdown()) then return end
+    local holder = tex.rustcoreHolder
+    local parent = holder and holder:GetParent()
+    if not parent then return end
+    local container = which == "player" and parent.PlayerFrameContainer or parent.TargetFrameContainer
+    local classic = IsClassicUIFrame(parent) and container
+    local artParent = classic or holder
+    local layer = classic and "OVERLAY" or "ARTWORK"
+    if tex:GetParent() ~= artParent then tex:SetParent(artParent) end
+    local currentLayer, sublevel = tex:GetDrawLayer()
+    if currentLayer ~= layer or sublevel ~= 0 then tex:SetDrawLayer(layer, 0) end
+    if tex.rustcoreClassicLayer and not classic and tex.rustcoreRestoreNative then
+        tex.rustcoreRestoreNative()
+    end
+    tex.rustcoreClassicLayer = not not classic
+    SyncClassicLevelBadge(tex, which, classic)
+end
+
 local function RaiseLevelText(candidates, holder)
+    if IsClassicUIFrame(holder:GetParent()) then return end
     for _, levelTextName in ipairs(candidates) do
         local levelText = _G[levelTextName]
         if levelText then
@@ -102,6 +159,7 @@ local function RaiseLevelText(candidates, holder)
 end
 
 local function RaiseValueTexts(textCandidates, barCandidates, holder)
+    if IsClassicUIFrame(holder:GetParent()) then return {} end
     local texts = {}
     local seen = {}
 
@@ -141,6 +199,7 @@ local function SetValueTextsVisible(texts, visible)
 end
 
 local function RaiseHitText(candidates, parent, holder)
+    if IsClassicUIFrame(holder:GetParent()) then return end
     local seen = {}
     local function Raise(text)
         if not text or seen[text] then return end
@@ -181,6 +240,7 @@ local function EnsurePlayerDragon()
     holder:SetPoint("CENTER", nativeTexture, "CENTER", PLAYER_X_OFFSET, PLAYER_Y_OFFSET)
 
     local tex = holder:CreateTexture("RustcoreDragonPlayerFrame", "ARTWORK")
+    tex.rustcoreHolder = holder
     tex:SetAllPoints(holder)
     tex:SetTexCoord(1, 0, 0, 1)
     tex:Hide()
@@ -200,6 +260,12 @@ local function EnsurePlayerDragon()
     iconHolder:SetFrameLevel(holder:GetFrameLevel() + 1)
     RaiseStatusIcons(STATUS_ICON_CANDIDATES_PLAYER, iconHolder)
 
+    -- Re-establish native text layering if this frame's ClassicUI skin is disabled.
+    tex.rustcoreRestoreNative = function()
+        RaiseLevelText(LEVEL_TEXT_CANDIDATES_PLAYER, holder)
+        playerValueTexts = RaiseValueTexts(VALUE_TEXT_CANDIDATES_PLAYER, VALUE_BAR_CANDIDATES_PLAYER, holder)
+        RaiseHitText(HIT_TEXT_CANDIDATES_PLAYER, parent, holder)
+    end
     playerDragon = tex
     return playerDragon
 end
@@ -216,6 +282,7 @@ local function EnsureTargetDragon()
     holder:SetPoint("CENTER", nativeTexture, "CENTER", TARGET_X_OFFSET, TARGET_Y_OFFSET)
 
     local tex = holder:CreateTexture("RustcoreDragonTargetFrame", "ARTWORK")
+    tex.rustcoreHolder = holder
     tex:SetAllPoints(holder)
     tex:SetTexCoord(0, 1, 0, 1)
     tex:Hide()
@@ -224,11 +291,19 @@ local function EnsureTargetDragon()
     targetValueTexts = RaiseValueTexts(VALUE_TEXT_CANDIDATES_TARGET, VALUE_BAR_CANDIDATES_TARGET, holder)
     RaiseHitText(HIT_TEXT_CANDIDATES_TARGET, parent, holder)
 
+    -- Re-establish native text layering if this frame's ClassicUI skin is disabled.
+    tex.rustcoreRestoreNative = function()
+        RaiseLevelText(LEVEL_TEXT_CANDIDATES_TARGET, holder)
+        targetValueTexts = RaiseValueTexts(VALUE_TEXT_CANDIDATES_TARGET, VALUE_BAR_CANDIDATES_TARGET, holder)
+        RaiseHitText(HIT_TEXT_CANDIDATES_TARGET, parent, holder)
+    end
     targetDragon = tex
     return targetDragon
 end
 
 local function SetNativeTextureHidden(which, hidden)
+    local parent = which == "player" and _G.PlayerFrame or _G.TargetFrame
+    if IsClassicUIFrame(parent) then hidden = false end
     local t = RustcoreCompat.PortraitTexture(which)
     if not t then return end
     if hidden then
@@ -259,6 +334,7 @@ end
 function RustcoreDragon.RefreshPlayerFrame()
     local tex = EnsurePlayerDragon()
     if not tex then return end
+    SyncDragonLayering(tex, "player")
 
     if not Rustcore.GetSetting("dragonPlayerFrame") then
         tex:Hide()
@@ -287,6 +363,7 @@ end
 function RustcoreDragon.RefreshTargetFrame()
     local tex = EnsureTargetDragon()
     if not tex then return end
+    SyncDragonLayering(tex, "target")
 
     local difficulty
     if Rustcore.GetSetting("dragonTargetFrame") and UnitExists("target") and UnitIsPlayer("target") then
@@ -341,6 +418,8 @@ eventFrame:SetScript("OnUpdate", function(_, elapsed)
     sinceRefresh = sinceRefresh + elapsed
     if sinceRefresh < REFRESH_INTERVAL then return end
     sinceRefresh = 0
+    SyncDragonLayering(playerDragon, "player")
+    SyncDragonLayering(targetDragon, "target")
     if playerDragonShown then
         SetNativeTextureHidden(NATIVE_TEXTURE_PLAYER, true)
         SetValueTextsVisible(playerValueTexts, true)

@@ -1,4 +1,4 @@
-# RustcoreOptionsWidgets.lua — 364 lines
+# RustcoreOptionsWidgets.lua — 366 lines
 
 Top-level definitions in `dist/forever/Rustcore/RustcoreOptionsWidgets.lua`.
 

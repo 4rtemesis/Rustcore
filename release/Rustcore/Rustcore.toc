@@ -25,6 +25,7 @@ RustcoreCompat.lua
 RustcoreCompatClassic.lua
 RustcoreCompatModern.lua
 RustcoreDiag.lua
+Reforge\API.lua
 Rustcore.lua
 # Verification system (certification tracks, integrity chain, playtime)
 Verification\Core.lua
@@ -44,6 +45,8 @@ Verification\Durability.lua
 Verification\DeathLoss.lua
 Verification\Transfer.lua
 Verification\UI.lua
+Reforge\Sources.lua
+Reforge\Core.lua
 RustcoreBroadcast.lua
 RustcoreSelfFoundBuff.lua
 RustcoreSelfFoundComm.lua
@@ -58,3 +61,5 @@ RustcoreOptions.lua
 RustcoreDifficultyPopup.lua
 RustcoreUI.lua
 RustcoreRusted.lua
+Reforge\UI.lua
+Reforge\Debug.lua

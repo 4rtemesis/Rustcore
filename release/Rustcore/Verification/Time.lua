@@ -212,13 +212,19 @@ function T.GetMissingSeconds()
     return missing
 end
 
--- Missing time as a share of the whole run, derived fresh on every call. Nil
--- when there is no played total to divide by, which is every moment before the
--- first /played reply lands.
+-- The run as Rustcore accounts for it: observed plus unobserved time. Lifetime
+-- /played is kept for transfer validation only; shares are taken of this total.
+function T.GetObservedTotal()
+    local state = GetTimeState()
+    return ((state and state.trackedSinceAnchor) or 0) + (T.GetUntrackedSeconds() or 0)
+end
+
+-- Missing time as a share of observed plus unobserved time, derived fresh on
+-- every call. Nil when nothing has been accounted for yet.
 function T.GetMissingPercent()
-    local played = T.GetLastServerPlayed()
-    if not played or played <= 0 then return nil end
-    return T.GetMissingSeconds() / played
+    local total = T.GetObservedTotal()
+    if total <= 0 then return nil end
+    return T.GetMissingSeconds() / total
 end
 
 -- The status that playtime coverage alone gives this run, and the reason for
@@ -276,7 +282,7 @@ function T.GetRequiredTracked(level)
     local missing = T.GetMissingSeconds()
     if missing <= 0 then return 0 end
 
-    local played = T.GetLastServerPlayed() or 0
+    local played = T.GetObservedTotal()
     if missing <= T.GetAllowedGap(played, level) then return 0 end
 
     local share = T.GetTolerance(level)

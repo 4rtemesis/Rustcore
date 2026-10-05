@@ -940,6 +940,9 @@ function X.BeginImport(text, callback)
             RustcoreSelfFoundBuff.Refresh()
         end
         if RustcoreStats and RustcoreStats.Refresh then RustcoreStats.Refresh() end
+        if RustcoreDifficultySlider and Rustcore.GetSetting then
+            RustcoreDifficultySlider:SetValue(Rustcore.GetSetting("difficulty"))
+        end
 
         local record = V.GetRecord()
         local message = string.format("Verification imported. %d clean minute(s) on this PC kept.",

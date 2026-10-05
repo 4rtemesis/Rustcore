@@ -253,6 +253,7 @@ end
 -- observed repair breaks the rules the character was playing under rather than
 -- merely looking suspicious -- section 47 maps that to FAILED.
 function D.OnRepairPerformed(detail)
+    if RustcoreReforge then RustcoreReforge.NoteRepair() end
     local track = V.GetTrack("difficulty")
     if not track then return end
 

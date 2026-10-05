@@ -1,20 +1,24 @@
-# RustcoreSelfFoundBuff.lua — 371 lines
+# RustcoreSelfFoundBuff.lua — 425 lines
 
 Top-level definitions in `dist/forever/Rustcore/RustcoreSelfFoundBuff.lua`.
 
 ```
 13:local function ShowSelfFoundTooltip(owner)
-36:local function AddBuffBorder(button)
-47:local function EnsureIconFrame()
-96:local function ReadPoints(frame)
-104:local function SamePoints(a, b)
-114:local function ApplyPoints(frame, points, offset)
-122:local function ReserveBuffSlot(enabled)
-146:function RefreshAuraLayout()
-184:local function EnsureTargetIcon()
-215:local function IsVerifiedTarget()
-239:local function RightmostTopRowTargetAuraButton()
-297:function RefreshTargetIcon()
-327:function RustcoreSelfFoundBuff.RefreshTarget()
-331:function RustcoreSelfFoundBuff.Refresh()
+37:local function AddBuffBorder(button)
+48:local function EnsureIconFrame()
+97:local function ReadPoints(frame)
+105:local function SamePoints(a, b)
+115:local function ApplyPoints(frame, points, offset)
+123:local function ReserveBuffSlots(count)
+145:function RefreshAuraLayout()
+173:function RustcoreSelfFoundBuff.SetRustboundIcon(button)
+188:function RustcoreSelfFoundBuff.RefreshPlayerLayout()
+200:local function EnsureTargetIcon()
+231:local function IsVerifiedTarget()
+255:local function RightmostTopRowTargetAuraButton()
+315:local function EnsureTargetRustboundIcon()
+334:local function IsRustboundTarget()
+342:function RefreshTargetIcon()
+382:function RustcoreSelfFoundBuff.RefreshTarget()
+386:function RustcoreSelfFoundBuff.Refresh()
 ```

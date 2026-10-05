@@ -75,6 +75,8 @@ local defaults = {
     difficulty      = 2,     -- 1=Lite, 2=Normal, 3=Hard, 4=Brutal, 5=Extreme
     selfFound       = false, -- block mailbox / AH / trade
     allowRepair     = false, -- if false (default), repair is blocked
+    reforgeThreshold = 50, -- Reforge All only; manual Reforge ignores this
+    reforgeGlow = true, -- highlight durability counters with a Reforge Shard
     keepMainWeapon  = false, -- spare main weapon slot from deletion
     ignoreDeathAfterEnemyPlayerDamage = false, -- skip deletion if a hostile player damaged you during the fight
     selfFoundBuffEnabled = true, -- show verified Self-Found status as a buff icon on the player's own buff bar
@@ -467,6 +469,8 @@ function Rustcore.SetSetting(key, value)
         elseif RustcoreStats.RefreshLayout then
             RustcoreStats.RefreshLayout()
         end
+    elseif (key == "reforgeGlow" or key == "reforgeThreshold") and RustcoreReforge then
+        RustcoreReforge.Refresh()
     elseif key == "durHUDGrowUpward" and RustcoreDurability then
         if RustcoreDurability.HandleGrowUpwardChanged then
             RustcoreDurability.HandleGrowUpwardChanged()
@@ -893,6 +897,7 @@ ApplyRepairBlock = function()
     if not Rustcore.GetSetting("allowRepair") then
         if MerchantRepairAllButton  then MerchantRepairAllButton:Disable();  MerchantRepairAllButton:SetAlpha(0.35)  end
         if MerchantRepairItemButton then MerchantRepairItemButton:Disable(); MerchantRepairItemButton:SetAlpha(0.35) end
+        if MerchantGuildBankRepairButton then MerchantGuildBankRepairButton:Disable(); MerchantGuildBankRepairButton:SetAlpha(0.35) end
     else
         if MerchantRepairAllButton  then MerchantRepairAllButton:Enable();  MerchantRepairAllButton:SetAlpha(1) end
         if MerchantRepairItemButton then MerchantRepairItemButton:Enable(); MerchantRepairItemButton:SetAlpha(1) end

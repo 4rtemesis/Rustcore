@@ -50,10 +50,8 @@ assert(RustcoreVerification.GetRecord() == nil)
 -- Exercise the real accrual code across two fresh session-local clocks.
 guid = 'Player-A'
 local timeSource = read('Verification/Time.lua')
-local a = assert(timeSource:find('local lastAccrual', 1, true))
-local b = assert(timeSource:find('-- ── Reconciliation', a, true))
 local function session()
-    return assert(loadstring('local V=RustcoreVerification; local sessionTracked=0; local function GetTimeState() return V.GetRecord().time end\n' .. timeSource:sub(a,b-1) .. '\nreturn Accrue, function() return sessionTracked end'))()
+    return assert(loadstring(timeSource .. '\nreturn Accrue, T.GetSessionTracked'))()
 end
 local accrue, total = session()
 now=10; accrue(); now=40; accrue()

@@ -59,6 +59,7 @@ local COLOR_DURATION_SECONDS = { 1, 1, 1 }
 local MANUAL_OFFSET_X, MANUAL_OFFSET_Y = -(BUTTON_SIZE / 2), 0
 
 local iconFrame
+local rustboundIcon
 local buttonPool = {}
 local active = false
 local sinceRefresh = 0
@@ -241,15 +242,27 @@ local function ShowNativeBuffFrame()
 end
 
 function RefreshAuraLayout()
-    if not active or not iconFrame or not _G.BuffFrame then return end
+    local hasRustbound = rustboundIcon and rustboundIcon:IsShown()
+    if not active and not hasRustbound then
+        ShowNativeBuffFrame()
+        for _, button in ipairs(buttonPool) do button:Hide() end
+        return
+    end
+    if not _G.BuffFrame then return end
 
     HideNativeBuffFrame()
 
     local perRow = ComputePerRow()
     local baseX, baseY = MANUAL_OFFSET_X, MANUAL_OFFSET_Y
-    PositionSlot(iconFrame, 1, perRow, baseX, baseY)
-
-    local slotIndex = 2
+    local slotIndex = 1
+    if active and iconFrame then
+        PositionSlot(iconFrame, slotIndex, perRow, baseX, baseY)
+        slotIndex = slotIndex + 1
+    end
+    if hasRustbound then
+        PositionSlot(rustboundIcon, slotIndex, perRow, baseX, baseY)
+        slotIndex = slotIndex + 1
+    end
     local usedCount = 0
     local now = GetTime()
 
@@ -334,7 +347,7 @@ end
 -- on the throttled refresh timer) so the fade reads smoothly instead of
 -- stepping in REFRESH_INTERVAL-sized jumps.
 function UpdateAuraFlash()
-    if not active or activeButtonCount == 0 then return end
+    if (not active and not (rustboundIcon and rustboundIcon:IsShown())) or activeButtonCount == 0 then return end
     local now = GetTime()
     for i = 1, activeButtonCount do
         local b = buttonPool[i]
@@ -550,11 +563,44 @@ function HideNativeTargetAurasForVerifiedTarget()
     end
 end
 
-function RefreshTargetIcon()
-    local icon = EnsureTargetIcon()
+local targetRustboundIcon
 
-    if not IsVerifiedTarget() then
-        icon:Hide()
+local function EnsureTargetRustboundIcon()
+    if targetRustboundIcon then return targetRustboundIcon end
+    local icon = CreateFrame("Button", "RustcoreRustboundTargetIcon", UIParent)
+    icon:SetSize(TARGET_BUTTON_SIZE, TARGET_BUTTON_SIZE)
+    icon:SetFrameStrata("MEDIUM")
+    icon:SetNormalTexture(RustcoreReforge.RUSTBOUND_ICON)
+    icon:EnableMouse(true)
+    icon:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Rustbound", 0.85, 0.6, 0.3)
+        GameTooltip:AddLine("This character has never repaired an item.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    icon:Hide()
+    targetRustboundIcon = icon
+    return icon
+end
+
+local function IsRustboundTarget()
+    if not RustcoreReforge or not Rustcore.GetSetting("dragonTargetFrame") then return false end
+    if not UnitExists("target") or not UnitIsPlayer("target") or not _G.TargetFrame then return false end
+    if UnitIsUnit("target", "player") then return RustcoreReforge.HasRustbound() end
+    return RustcoreSelfFoundComm and RustcoreSelfFoundComm.IsKnownRustbound
+        and RustcoreSelfFoundComm.IsKnownRustbound(UnitName("target"))
+end
+
+function RefreshTargetIcon()
+    local selfFound = EnsureTargetIcon()
+    local hasSelfFound, hasRustbound = IsVerifiedTarget(), IsRustboundTarget()
+    local rustbound = RustcoreReforge and EnsureTargetRustboundIcon()
+    selfFound:Hide()
+    if rustbound then rustbound:Hide() end
+    local icon = hasSelfFound and selfFound or rustbound
+
+    if not hasSelfFound and not hasRustbound then
         SetNativeTargetAurasHidden(false)
         for _, b in ipairs(targetButtonPool) do
             b:Hide()
@@ -564,10 +610,16 @@ function RefreshTargetIcon()
 
     SetNativeTargetAurasHidden(true)
 
-    icon.texture:SetTexture(Rustcore.GetSelfFoundIconTexture())
+    if hasSelfFound then selfFound.texture:SetTexture(Rustcore.GetSelfFoundIconTexture()) end
     PositionTargetSlot(icon, 1)
     icon:Show()
 
+    local prestigeCount = 1
+    if hasSelfFound and hasRustbound then
+        PositionTargetSlot(rustbound, 2)
+        rustbound:Show()
+        prestigeCount = 2
+    end
     local usedCount = 0
 
     -- Buffs and debuffs are laid out as two separate runs rather than one
@@ -612,7 +664,7 @@ function RefreshTargetIcon()
     end
 
     -- Buffs continue the row the Self-Found icon opened at slot 1.
-    local afterBuffs = AddAura("HELPFUL", 2, 0)
+    local afterBuffs = AddAura("HELPFUL", prestigeCount + 1, 0)
     -- Debuffs start fresh on the line under whatever the buffs filled.
     local buffRows = math.ceil((afterBuffs - 1) / TARGET_PER_ROW)
     AddAura("HARMFUL", 1, buffRows)
@@ -620,6 +672,18 @@ function RefreshTargetIcon()
     for i = usedCount + 1, #targetButtonPool do
         targetButtonPool[i]:Hide()
     end
+end
+
+function RustcoreSelfFoundBuff.SetRustboundIcon(button)
+    rustboundIcon = button
+    button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
+    button:SetClampedToScreen(true)
+    button:SetFrameStrata("MEDIUM")
+    pcall(RefreshAuraLayout)
+end
+
+function RustcoreSelfFoundBuff.RefreshPlayerLayout()
+    pcall(RefreshAuraLayout)
 end
 
 function RustcoreSelfFoundBuff.RefreshTarget()
@@ -636,14 +700,10 @@ function RustcoreSelfFoundBuff.Refresh()
     if active then
         iconFrame.texture:SetTexture(Rustcore.GetSelfFoundIconTexture())
         iconFrame:Show()
-        pcall(RefreshAuraLayout)
     else
         iconFrame:Hide()
-        ShowNativeBuffFrame()
-        for _, b in ipairs(buttonPool) do
-            b:Hide()
-        end
     end
+    pcall(RefreshAuraLayout)
 
     pcall(RefreshTargetIcon)
 end

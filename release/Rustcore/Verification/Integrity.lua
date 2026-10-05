@@ -151,6 +151,21 @@ local function DurabilityDigest(record)
     return I.Hash(concat(parts, ";"))
 end
 
+-- Stable physical-item Reforge state is covered by the existing integrity seal.
+local function ReforgeDigest(record)
+    local state = record.reforge
+    if not state then return "" end
+    local parts = { tostring(state.everRepaired == true), tostring(state.rustboundEarned == true), tostring(state.rustboundLost == true) }
+    for guid, item in pairs(state.items or {}) do
+        parts[#parts + 1] = I.Canonical({ guid = guid, id = item.id, source = item.source, charged = item.charged })
+    end
+    for guid, item in pairs(state.pending or {}) do
+        parts[#parts + 1] = I.Canonical({ pending = guid, id = item.id, cur = item.cur, max = item.max, test = item.test })
+    end
+    sort(parts)
+    return I.Hash(concat(parts, ";"))
+end
+
 -- Typed warning counts for one track, rendered deterministically.
 --
 -- Warnings are worth protecting in their own right: a single unexplained repair
@@ -274,6 +289,7 @@ local function CriticalState(record)
         untracked   = Seconds(timeState.untrackedSeconds),
         sequence    = chain.sequence or "",
         durability  = DurabilityDigest(record),
+        reforge     = ReforgeDigest(record),
         deathLoss   = DeathLossDigest(record),
     }
 end

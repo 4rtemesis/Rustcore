@@ -283,6 +283,8 @@ local function RefreshCombatLockState(frame)
     end
 
     local controls = {
+        frame.reforgeSlider,
+        frame.cbReforgeGlow,
         frame.cbSelfFound,
         frame.cbSelfFoundBuff,
         frame.cbSelfFoundConjured,
@@ -524,6 +526,7 @@ local function BuildOptionsFrame()
     local interfacePage = MakePage()
     local notificationsPage = MakePage()
     local appearancePage = MakePage()
+    local reforgePage = MakePage()
     local temperedPage = MakePage()
 
     local function PercentFormatter(value) return math.floor(value * 100 + 0.5) .. "%" end
@@ -953,6 +956,35 @@ local function BuildOptionsFrame()
         PercentFormatter,
         "Only has an effect while Panel Background is switched on for the durability HUD."
     )
+
+    -- The locked page contains only the explanation; hidden controls and their
+    -- labels are parented together so nothing leaks into the pre-unlock page.
+    local reforgeLockedText = reforgePage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    reforgeLockedText:SetPoint("TOPLEFT", reforgePage, "TOPLEFT", 26, -26)
+    reforgeLockedText:SetWidth(350)
+    reforgeLockedText:SetJustifyH("LEFT")
+    reforgeLockedText:SetText("Reforging allows an item to be repaired by using a Reforge Shard earned from the boss that dropped it. This is unlocked at max level.")
+    ApplyBodyFont(reforgeLockedText, 17)
+    local reforgeControls = CreateFrame("Frame", nil, reforgePage)
+    reforgeControls:SetAllPoints(reforgePage)
+    MakeHeader(reforgeControls, "Boss Reforging", -20)
+    local reforgeSlider = MakeSettingSlider(reforgeControls, "RustcoreReforgeThresholdSlider",
+        "Reforge All Threshold", -90, 10, 90, 1, "reforgeThreshold",
+        function(value) return math.floor(value) .. "%" end,
+        "Only automatically reforge items with a Reforge Shard at or below this durability. Manual Reforge ignores this threshold.")
+    local cbReforgeGlow = MakeCheckbox(reforgeControls, "Glow on Reforge Ready Counters",
+        "Show a glow on a durability counter when its item has earned a Reforge Shard.",
+        reforgeSlider, -42, "reforgeGlow")
+    f.reforgeSlider = reforgeSlider
+    f.cbReforgeGlow = cbReforgeGlow
+    f.refreshReforgePage = function()
+        local unlocked = RustcoreReforge and RustcoreReforge.AtUnlockLevel() or false
+        reforgeLockedText:SetShown(not unlocked)
+        reforgeControls:SetShown(unlocked)
+        cbReforgeGlow:Refresh()
+    end
+    reforgePage:SetScript("OnShow", f.refreshReforgePage)
+    f.refreshReforgePage()
 
     -- About
     local aboutTitle = temperedPage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1405,6 +1437,7 @@ local function BuildOptionsFrame()
         interface = interfacePage,
         notifications = notificationsPage,
         appearance = appearancePage,
+        reforge = reforgePage,
         tempered = temperedPage,
         verification = verificationPage,
     }
@@ -1472,8 +1505,9 @@ local function BuildOptionsFrame()
     MakeTab("interface", "Interface", 2)
     MakeTab("notifications", "Notifications", 3)
     MakeTab("appearance", "Appearance", 4)
-    MakeTab("tempered", "About", 5)
-    MakeTab("verification", "Verification", 6)
+    MakeTab("reforge", "Reforge", 5)
+    MakeTab("tempered", "About", 6)
+    MakeTab("verification", "Verification", 7)
     ShowPage("gameplay")
 
     -- Store refs for Refresh
@@ -1566,6 +1600,8 @@ local function BuildOptionsFrame()
         self.cbDurBackground:Refresh()
         self.durOpacitySlider:SetValue(Rustcore.GetSetting("durHUDBackgroundOpacity"))
         self.durShadowSlider:SetValue(Rustcore.GetSetting("durHUDBackgroundShadow"))
+        self.reforgeSlider:SetValue(Rustcore.GetSetting("reforgeThreshold") or 50)
+        self.refreshReforgePage()
         self.cbDurShowAll:Refresh()
         self.cbDurGrowUpward:Refresh()
         self.cbDurReverseOrder:Refresh()
@@ -1614,6 +1650,10 @@ function RustcoreOptions.Toggle()
         PlaySoundFile(Rustcore.GetAssetPath("Audio/Metalsound.wav"), "Master")
         optFrame:Show()
     end
+end
+
+function RustcoreOptions.RefreshReforgePage()
+    if optFrame and optFrame.refreshReforgePage then optFrame.refreshReforgePage() end
 end
 
 function RustcoreOptions.Hide()

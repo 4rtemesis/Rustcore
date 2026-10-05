@@ -1,4 +1,4 @@
-# RustcoreDragon.lua — 421 lines
+# RustcoreDragon.lua — 502 lines
 
 Top-level definitions in `dist/forever/Rustcore/RustcoreDragon.lua`.
 
@@ -8,15 +8,18 @@ Top-level definitions in `dist/forever/Rustcore/RustcoreDragon.lua`.
 109:local function CopyNativeTexture(source, holder, layer, sublevel)
 117:local function SyncNativeOverlays()
 143:local function RaiseLevelBadge(candidates, native, holder)
-151:local function RaiseLevelText(candidates, holder)
-168:local function RaiseValueTexts(textCandidates, barCandidates, holder)
-197:local function SetValueTextsVisible(texts, visible)
-207:local function RaiseHitText(candidates, parent, holder)
-223:local function RaiseStatusIcons(candidates, iconHolder)
-236:local function EnsurePlayerDragon()
-268:local function EnsureTargetDragon()
-299:local function SetNativeTextureHidden(which, hidden)
-319:local function LocalDragonTier()
-327:function RustcoreDragon.RefreshPlayerFrame()
-357:function RustcoreDragon.RefreshTargetFrame()
+154:local function IsClassicUIFrame(parent)
+162:local function SyncClassicLevelBadge(tex, which, container)
+188:local function SyncDragonLayering(tex, which)
+207:local function RaiseLevelText(candidates, holder)
+225:local function RaiseValueTexts(textCandidates, barCandidates, holder)
+255:local function SetValueTextsVisible(texts, visible)
+265:local function RaiseHitText(candidates, parent, holder)
+282:local function RaiseStatusIcons(candidates, iconHolder)
+295:local function EnsurePlayerDragon()
+336:local function EnsureTargetDragon()
+374:local function SetNativeTextureHidden(which, hidden)
+396:local function LocalDragonTier()
+404:function RustcoreDragon.RefreshPlayerFrame()
+435:function RustcoreDragon.RefreshTargetFrame()
 ```

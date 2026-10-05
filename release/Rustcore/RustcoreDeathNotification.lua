@@ -280,6 +280,13 @@ local function BuildFrame()
     art:SetTexture(ART_PATH)
     f.art = art
 
+    -- Darken only the recessed text panel, below the lettering and its shadow.
+    local shade = f:CreateTexture(nil, "ARTWORK")
+    shade:SetPoint("TOPLEFT", f, "TOPLEFT", FRAME_WIDTH * 0.065, -FRAME_HEIGHT * 0.613)
+    shade:SetPoint("BOTTOMRIGHT", f, "TOPLEFT", FRAME_WIDTH * 0.935, -FRAME_HEIGHT * 0.893)
+    shade:SetColorTexture(0, 0, 0, 0.32)
+    f.panelShade = shade
+
     local line1 = CreateShadowedFontString(f, LINE1_FONT_SIZE)
     line1:SetWidth(TEXT_WIDTH)
     line1.shadow:SetWidth(TEXT_WIDTH)
